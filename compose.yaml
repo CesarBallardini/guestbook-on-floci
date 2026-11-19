@@ -1,0 +1,60 @@
+# The AWS emulator and the Ansible control node.
+#
+#   docker compose up -d --wait        # start Floci, before Terraform
+#   docker compose run --rm ansible    # run the playbook, after Terraform
+#
+# Floci starts the EC2 instance and the RDS instance as containers of their own, so it needs the
+# Docker socket. That gives this container control of the Docker daemon: the image is pinned by
+# digest, and the stack should be stopped when it isn't in use (docker compose down -v).
+name: guestbook-on-floci
+services:
+  aws-emulator:
+    image: floci/floci@sha256:a0fbf944d7f338cc0856f1ef83831ea749ff2be71956eb7a7fce08fc21458e19  # 2.5.0
+    user: root
+    # On shutdown Floci stops the containers it started, one by one.
+    stop_grace_period: 60s
+    environment:
+      # The web console: Floci starts it as one more container, the first time somebody opens
+      # http://127.0.0.1:4566/_floci/ui. The bind address keeps its port on this machine;
+      # without it, the port is published on every network interface.
+      FLOCI_SERVICES_UI_ENABLED: "true"
+      FLOCI_SERVICES_UI_BIND_ADDRESS: 127.0.0.1
+      # 0.7.0, the version Floci 2.5.0 asks for, pinned by digest like Floci itself.
+      FLOCI_SERVICES_UI_IMAGE: floci/floci-ui@sha256:90dcaa588f9b3cd3cb5ccc98559286574391001e46735b7be4373364d51f7dfe
+      # The network Floci puts the EC2 and RDS containers on: the one below.
+      FLOCI_SERVICES_DOCKER_NETWORK: guestbook-on-floci
+      # Which Docker image an AMI id stands for. This file replaces Floci's own catalog.
+      FLOCI_SERVICES_EC2_IMAGE_CATALOG_PATH: /etc/floci/image-catalog.yaml
+      # Off: no Docker network per VPC. Everything stays on the one network below, and Floci
+      # keeps a single route (with a second network, port 4566 can stop answering).
+      FLOCI_SERVICES_EC2_VPC_NETWORKS_ENABLED: "false"
+      # Off: no host port per security-group rule. The load balancer is the way in.
+      FLOCI_SERVICES_EC2_PUBLISH_SECURITY_GROUP_PORTS: "false"
+      # The host name RDS reports as its endpoint: this service, as the instance sees it.
+      FLOCI_SERVICES_RDS_ENDPOINT_HOST: aws-emulator
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./floci/image-catalog.yaml:/etc/floci/image-catalog.yaml:ro
+    ports:
+      - "127.0.0.1:4566:4566"  # the AWS API, for Terraform and the AWS CLI
+      - "127.0.0.1:8080:8080"  # the load balancer's HTTP listener
+      - "127.0.0.1:8443:8443"  # the load balancer's HTTPS listener
+      - "127.0.0.1:7001:7001"  # the RDS instance, for psql from the host
+    networks:
+      - guestbook-on-floci
+    # The image brings its own health check.
+
+  # The Ansible control node. It has a profile, so "docker compose up" leaves it alone.
+  ansible:
+    profiles: ["tools"]
+    build: ./ansible
+    image: guestbook-on-floci-ansible
+    volumes:
+      # The playbook, the app, and the key and inventory that Terraform wrote in .generated/
+      - .:/work:ro
+    networks:
+      - guestbook-on-floci
+
+networks:
+  guestbook-on-floci:
+    name: guestbook-on-floci

@@ -1,0 +1,66 @@
+user nginx;
+worker_processes 1;
+pid /run/nginx.pid;
+error_log /var/log/nginx/error.log;
+
+events {
+    worker_connections 256;
+}
+
+http {
+    include /etc/nginx/mime.types;
+
+    # Who the visitor is. The load balancer makes the connection and writes the visitor's
+    # address at the end of X-Forwarded-For. nginx takes it from there, and only when the
+    # connection comes from the load balancer's addresses: anybody else could write what
+    # they like in that header.
+    set_real_ip_from {{ load_balancer_cidr }};
+    real_ip_header X-Forwarded-For;
+
+    # $remote_addr is the visitor from here on; $realip_remote_addr is who connected.
+    log_format guestbook '$remote_addr - [$time_iso8601] "$request" $status $body_bytes_sent '
+                         '"$http_user_agent" via=$realip_remote_addr';
+    access_log /var/log/nginx/access.log guestbook;
+
+    # How often one address may sign: {{ signing_rate }} on average, and up to
+    # {{ signing_burst }} at once. All of nginx's workers count together, and a flood is
+    # stopped here, before it costs the app, the database or S3 anything.
+    limit_req_zone $binary_remote_addr zone=signing:1m rate={{ signing_rate }};
+    limit_req_status 429;
+
+    server {
+        listen 80 default_server;
+        # A picture of up to 2 MB, plus the rest of the form. The app checks the picture's size
+        # itself and says so; this limit stops much bigger uploads before they reach it.
+        client_max_body_size 3m;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+
+        # The page shows the text of a refused post next to the form. Without these, a visitor
+        # would read nginx's own HTML pages there. The first has the same words as the app's.
+        # (nginx has no way to write a line break in a text but to break the line.)
+        error_page 413 @upload_too_large;
+        location @upload_too_large {
+            default_type text/plain;
+            return 413 "A picture can have up to 2 MB.
+";
+        }
+        error_page 429 @too_many_messages;
+        location @too_many_messages {
+            default_type text/plain;
+            return 429 "Too many messages in a short time. Please wait a moment and try again.
+";
+        }
+
+        location = /messages {
+            limit_req zone=signing burst={{ signing_burst }} nodelay;
+            proxy_pass http://127.0.0.1:{{ gunicorn_port }};
+        }
+
+        location / {
+            proxy_pass http://127.0.0.1:{{ gunicorn_port }};
+        }
+    }
+}

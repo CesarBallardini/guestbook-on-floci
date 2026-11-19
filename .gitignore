@@ -1,0 +1,20 @@
+# Terraform's working files. The state holds the emulated database's password and the SSH key.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+# Settings of this laptop only
+*.auto.tfvars
+# Written by Terraform for Ansible: the SSH private key and the inventory
+.generated/
+
+# Python: the virtual environment, caches and coverage reports
+.venv/
+__pycache__/
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+.pyrefly_cache/
+.coverage
+htmlcov/
+

@@ -1,0 +1,20 @@
+# Which Docker image stands for which AMI id. Floci reads this file instead of its own catalog
+# (FLOCI_SERVICES_EC2_IMAGE_CATALOG_PATH in compose.yaml), so it lists every AMI the emulator
+# offers: one.
+#
+# The image is Amazon Linux 2023 as of June 2026 (release 2023.12.20260608, the first with
+# Python 3.14.5), pinned by digest. An Amazon Linux 2023 image installs packages from the
+# repository version it was built for, so this line also fixes the versions dnf installs.
+# To move to a later release, change the tag and the digest here, and the AMI id to match
+# (also in terraform/variables.tf).
+defaultDockerImage: public.ecr.aws/amazonlinux/amazonlinux:2023.12.20260611.0@sha256:d555bba4593ec3992e9ac8c081bad81d7f01a951bf0f890c7ae8f0026f381352
+
+images:
+  - imageId: ami-al2023-20260611
+    dockerImage: public.ecr.aws/amazonlinux/amazonlinux:2023.12.20260611.0@sha256:d555bba4593ec3992e9ac8c081bad81d7f01a951bf0f890c7ae8f0026f381352
+    name: al2023-container-2023.12.20260611.0-x86_64
+    description: Amazon Linux 2023, container image 2023.12.20260611.0
+    ownerId: "137112412989"
+    imageOwnerAlias: amazon
+    architecture: x86_64
+    creationDate: "2026-06-22T00:00:00.000Z"

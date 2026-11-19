@@ -1,0 +1,8 @@
+# Bandit configuration (SAST -- static security analysis).
+#
+# There is no baseline: any finding fails CI, pre-commit and `make security`.
+exclude_dirs:
+  - tests
+  - .venv
+  - build
+  - dist

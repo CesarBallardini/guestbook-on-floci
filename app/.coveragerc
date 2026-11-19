@@ -1,0 +1,16 @@
+# fail_under is a hard gate, not a report: `pytest --cov` exits non-zero below it.
+#
+# What talks to PostgreSQL and S3 is left out: the unit and acceptance tests run on in-memory
+# fakes, and these files are covered by the integration tests, against the emulator.
+
+[run]
+omit =
+    guestbook/infrastructure/database/*
+    # Declarations only (Protocols, read by the type checkers): nothing in it runs.
+    guestbook/domain/output_ports.py
+    guestbook/infrastructure/s3_picture_storage_adapter.py
+
+[report]
+fail_under = 90
+show_missing = true
+precision = 0

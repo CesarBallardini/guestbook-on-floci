@@ -1,0 +1,111 @@
+[project]
+name = "guestbook"
+version = "0.1.0"
+description = "A guestbook: one page that lists messages, with an optional picture, and takes a new one"
+# The floor is the Python 3.14 of the Amazon Linux 2023 release the instance runs.
+requires-python = ">=3.14.5"
+dependencies = [
+    "alembic==1.20.1",
+    "boto3==1.43.124",
+    "fastapi==0.162.0",
+    "gunicorn==26.2.0",
+    "jinja2==3.1.6",
+    "psycopg[binary]==3.3.8",
+    "python-multipart==0.0.33",
+    "sqlalchemy==2.1.8",
+    "uvicorn==0.54.0",
+    "uvicorn-worker==0.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2",
+    "hypothesis==6.170.14",
+    "pytest>=8",
+    "pytest-cov",
+    "pytest-bdd",
+    "pytest-timeout",
+    "pytest-playwright",
+    "ruff",
+    "pyright",
+    "pyrefly",
+    "bandit[toml]",
+    "pip-audit",
+    "import-linter==2.15",
+    "grimp==3.18",  # import-linter's engine, pinned with it
+]
+
+[tool.pytest.ini_options]
+# Unit and acceptance tests by default. Integration and e2e tests need the emulator running:
+# see the Makefile.
+addopts = "-ra --strict-markers -m 'not integration and not e2e'"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "unit: fast tests with no external dependencies",
+    "bdd: behavior-driven acceptance tests (pytest-bdd, Gherkin)",
+    "integration: tests against the PostgreSQL and S3 of the running emulator",
+    "e2e: end-to-end tests against the deployed guestbook (Playwright)",
+]
+timeout = 300
+timeout_func_only = true
+# Warnings are failures. Each ignore names a specific message and says why it can't be fixed.
+filterwarnings = [
+    "error",
+    # gherkin passes `maxsplit` positionally to re.split, deprecated in 3.13+. pytest-bdd pins
+    # the gherkin release that does it.
+    "ignore:'maxsplit' is passed as positional argument:DeprecationWarning",
+    # pytest-base-url, which pytest-playwright brings in, defines its session fixture in a way
+    # pytest 10 will remove. Nothing here to fix; revisit when pytest-base-url has a release for it.
+    "ignore:Session-scoped fixtures defined as instance methods are deprecated:pytest.PytestRemovedIn10Warning",
+]
+
+# The ports-and-adapters rules, checked on the imports by "make architecture".
+[tool.importlinter]
+# application.py, the composition root, is a module and may import every layer.
+root_packages = ["guestbook"]
+# So that a contract can name fastapi, psycopg or boto3.
+include_external_packages = true
+# An import under "if TYPE_CHECKING:" is a dependency too.
+exclude_type_checking_imports = false
+
+[[tool.importlinter.contracts]]
+id = "layers"
+name = "Dependencies point inwards: adapters and use cases > domain"
+type = "layers"
+# A layer imports only the layers below it. "|" puts two on one level and forbids imports
+# between them: the adapters never import the use cases, nor the use cases the adapters.
+layers = [
+    "infrastructure | use_cases",
+    "domain",
+]
+containers = ["guestbook"]
+# A new package directly under guestbook/ fails the check until it is given a layer here.
+exhaustive = true
+
+[[tool.importlinter.contracts]]
+id = "frameworks-stay-in-infrastructure"
+name = "The domain and the use cases know no framework, database or cloud library"
+type = "forbidden"
+source_modules = ["guestbook.domain", "guestbook.use_cases"]
+forbidden_modules = [
+    "fastapi", "starlette", "jinja2", "sqlalchemy", "alembic", "psycopg", "boto3", "botocore", "uvicorn", "gunicorn",
+]
+
+[[tool.importlinter.contracts]]
+id = "adapters-are-independent"
+name = "An adapter doesn't import another adapter"
+type = "independence"
+modules = [
+    "guestbook.infrastructure.database",
+    "guestbook.infrastructure.s3_picture_storage_adapter",
+    "guestbook.infrastructure.system_clock_adapter",
+    "guestbook.infrastructure.uuid7_generator_adapter",
+    "guestbook.infrastructure.web",
+]
+
+[[tool.importlinter.contracts]]
+id = "ports-are-independent"
+name = "Input ports and output ports don't import each other"
+type = "independence"
+modules = ["guestbook.domain.input_ports", "guestbook.domain.output_ports"]

@@ -1,0 +1,6 @@
+# ansible-lint, run by "make lint" in the control node's container.
+# The strictest of its profiles: every rule applies.
+profile: production
+# The project is mounted read-only in the container: check without the network and write
+# nothing next to the playbook.
+offline: true

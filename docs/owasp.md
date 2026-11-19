@@ -1,0 +1,897 @@
+# The guestbook against the OWASP ASVS 5.0.0
+
+State on 2026-11-19. This page says, requirement by requirement, whether the guestbook and
+its deployment comply with the
+[OWASP Application Security Verification Standard](https://owasp.org/www-project-application-security-verification-standard/),
+version 5.0.0.
+
+- [1. What the standard is](#1-what-the-standard-is)
+- [2. How to read the tables](#2-how-to-read-the-tables)
+- [3. Summary](#3-summary)
+- [4. Every requirement](#4-every-requirement)
+- [5. Licence of the requirement texts](#5-licence-of-the-requirement-texts)
+
+## 1. What the standard is
+
+The ASVS is a list of security requirements for web applications, written so that each one
+can be checked: every requirement starts with "Verify that". Version 5.0.0 has
+345 requirements in 17 chapters. A requirement number such as `3.4.1` reads chapter,
+section, requirement.
+
+Each requirement has a level, and a level includes the ones below it:
+
+| Level | What it is | Requirements |
+|---|---|---|
+| 1 | The first layer of defence: what stops the common attacks | 70 |
+| 2 | What most applications should reach | 183 |
+| 3 | For applications where a failure costs the most | 92 |
+
+In many chapters the first section asks for documents: the decisions an implementation is
+then checked against. That is why several rows below say "not written".
+
+The standard covers the application and what serves, changes or checks its HTTP traffic.
+Here that is the app, gunicorn, nginx, the load balancer, and what Terraform and Ansible
+configure around them: the security group, the role, the database and the bucket.
+
+## 2. How to read the tables
+
+| Mark | Meaning |
+|---|---|
+| ✅ Yes | The guestbook complies today |
+| 🟡 Partly | Part of the requirement is met; the note says which part is not |
+| ❌ No | It does not comply |
+| ❔ Not checked | Nobody has checked it yet. It counts as not complying |
+| ➖ n/a | The requirement is about something the guestbook does not have; the note says what |
+
+Three things to keep in mind:
+
+- **"n/a" holds only while the guestbook has no accounts.** Chapters V6 to V10 are about
+  logins, sessions, permissions and tokens. The day somebody can log in, for example to
+  remove a message, they apply.
+- **"Yes" is a reading of the code and of the running deployment in the emulator**, not an
+  audit by a third party. Where a test shows it, the note says so.
+- **The emulator cannot show everything.** Floci records security groups, IAM policies and
+  the listener's TLS policy without enforcing them, and its certificate is its own. Those
+  requirements can only be shown on AWS.
+
+## 3. Summary
+
+Of the 345 requirements, 190 are about something the guestbook does not have. Of the
+155 that apply, it complies with 65, in part with 21, and not with 62;
+7 are not checked.
+
+By level:
+
+| Level | Requirements | Yes | Partly | No | Not checked | n/a |
+|---|---|---|---|---|---|---|
+| 1 | 70 | 21 | 4 | 5 | 0 | 40 |
+| 2 | 183 | 32 | 15 | 31 | 1 | 104 |
+| 3 | 92 | 12 | 2 | 26 | 6 | 46 |
+| All | 345 | 65 | 21 | 62 | 7 | 190 |
+
+By chapter:
+
+| Chapter | Requirements | Yes | Partly | No | Not checked | n/a |
+|---|---|---|---|---|---|---|
+| [V1 Encoding and Sanitization](#v1-encoding-and-sanitization) | 30 | 12 | 0 | 0 | 0 | 18 |
+| [V2 Validation and Business Logic](#v2-validation-and-business-logic) | 13 | 4 | 3 | 1 | 0 | 5 |
+| [V3 Web Frontend Security](#v3-web-frontend-security) | 31 | 10 | 3 | 12 | 1 | 5 |
+| [V4 API and Web Service](#v4-api-and-web-service) | 16 | 5 | 0 | 1 | 3 | 7 |
+| [V5 File Handling](#v5-file-handling) | 13 | 4 | 1 | 5 | 0 | 3 |
+| [V6 Authentication](#v6-authentication) | 47 | 0 | 0 | 0 | 0 | 47 |
+| [V7 Session Management](#v7-session-management) | 19 | 0 | 0 | 0 | 0 | 19 |
+| [V8 Authorization](#v8-authorization) | 13 | 0 | 0 | 0 | 0 | 13 |
+| [V9 Self-contained Tokens](#v9-self-contained-tokens) | 7 | 0 | 0 | 0 | 0 | 7 |
+| [V10 OAuth and OIDC](#v10-oauth-and-oidc) | 36 | 0 | 0 | 0 | 0 | 36 |
+| [V11 Cryptography](#v11-cryptography) | 24 | 8 | 1 | 5 | 0 | 10 |
+| [V12 Secure Communication](#v12-secure-communication) | 12 | 0 | 2 | 9 | 0 | 1 |
+| [V13 Configuration](#v13-configuration) | 21 | 4 | 4 | 12 | 0 | 1 |
+| [V14 Data Protection](#v14-data-protection) | 13 | 6 | 0 | 6 | 0 | 1 |
+| [V15 Secure Coding and Architecture](#v15-secure-coding-and-architecture) | 21 | 7 | 3 | 5 | 3 | 3 |
+| [V16 Security Logging and Error Handling](#v16-security-logging-and-error-handling) | 17 | 5 | 4 | 6 | 0 | 2 |
+| [V17 WebRTC](#v17-webrtc) | 12 | 0 | 0 | 0 | 0 | 12 |
+
+The Level 1 requirements that are open: 2.1.1, 3.2.1, 3.3.1, 3.4.1, 12.1.1, 12.2.1, 12.2.2, 15.1.1, 15.2.1.
+
+## 4. Every requirement
+
+The "Requirement" column is the text of the standard, word for word.
+
+### V1 Encoding and Sanitization
+
+#### V1.1 Encoding and Sanitization Architecture
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 1.1.1 | 2 | Verify that input is decoded or unescaped into a canonical form only once, it is only decoded when encoded data in that form is expected, and that this is done before processing the input further, for example it is not performed after input validation or sanitization. | ✅ Yes | FastAPI decodes a form once; the app decodes nothing again |
+| 1.1.2 | 2 | Verify that the application performs output encoding and escaping either as a final step before being used by the interpreter for which it is intended or by the interpreter itself. | ✅ Yes | Texts are stored as written; Jinja escapes them when it makes the page |
+
+#### V1.2 Injection Prevention
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 1.2.1 | 1 | Verify that output encoding for an HTTP response, HTML document, or XML document is relevant for the context required, such as encoding the relevant characters for HTML elements, HTML attributes, HTML comments, CSS, or HTTP header fields, to avoid changing the message or document structure. | ✅ Yes | Jinja autoescape; an acceptance scenario and a browser test post markup and read it back as text |
+| 1.2.2 | 1 | Verify that when dynamically building URLs, untrusted data is encoded according to its context (e.g., URL encoding or base64url encoding for query or path parameters). Ensure that only safe URL protocols are permitted (e.g., disallow javascript: or data:). | ✅ Yes | The only URL built from data is `/pictures/<key>`, and the app makes the key |
+| 1.2.3 | 1 | Verify that output encoding or escaping is used when dynamically building JavaScript content (including JSON), to avoid changing the message or document structure (to avoid JavaScript and JSON injection). | ✅ Yes | No JavaScript or JSON is built from what a visitor sends |
+| 1.2.4 | 1 | Verify that data selection or database queries (e.g., SQL, HQL, NoSQL, Cypher) use parameterized queries, ORMs, entity frameworks, or are otherwise protected from SQL Injection and other database injection attacks. This is also relevant when writing stored procedures. | ✅ Yes | SQLAlchemy sends values as parameters |
+| 1.2.5 | 1 | Verify that the application protects against OS command injection and that operating system calls use parameterized OS queries or use contextual command line output encoding. | ✅ Yes | The app runs no operating-system command |
+| 1.2.6 | 2 | Verify that the application protects against LDAP injection vulnerabilities, or that specific security controls to prevent LDAP injection have been implemented. | ➖ n/a | No LDAP |
+| 1.2.7 | 2 | Verify that the application is protected against XPath injection attacks by using query parameterization or precompiled queries. | ➖ n/a | No XPath |
+| 1.2.8 | 2 | Verify that LaTeX processors are configured securely (such as not using the "– shell-escape" flag) and an allowlist of commands is used to prevent LaTeX injection attacks. | ➖ n/a | No LaTeX |
+| 1.2.9 | 2 | Verify that the application escapes special characters in regular expressions (typically using a backslash) to prevent them from being misinterpreted as metacharacters. | ➖ n/a | The app uses no regular expression |
+| 1.2.10 | 3 | Verify that the application is protected against CSV and Formula Injection. The application must follow the escaping rules defined in RFC 4180 sections 2.6 and 2.7 when exporting CSV content. Additionally, when exporting to CSV or other spreadsheet formats (such as XLS, XLSX, or ODF), special characters (including '=', '+', '-', '@', '`\t`'(tab), and '\\0'(null character)) must be escaped with a single quote if they appear as the first character in a field value. | ➖ n/a | Nothing is exported to CSV or a spreadsheet |
+
+#### V1.3 Sanitization
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 1.3.1 | 1 | Verify that all untrusted HTML input from WYSIWYG editors or similar is sanitized using a well-known and secure HTML sanitization library or framework feature. | ➖ n/a | No HTML input: every text is shown as text |
+| 1.3.2 | 1 | Verify that the application avoids the use of eval() or other dynamic code execution features such as Spring Expression Language (SpEL). Where there is no alternative, any user input being included must be sanitized before being executed. | ✅ Yes | No `eval`, `exec` or expression language |
+| 1.3.3 | 2 | Verify that data being passed to a potentially dangerous context is sanitized beforehand to enforce safety measures, such as only allowing characters which are safe for this context and trimming input which is too long. | ✅ Yes | Lengths are limited and the NUL character is refused, in the domain and again in the database |
+| 1.3.4 | 2 | Verify that user-supplied Scalable Vector Graphics (SVG) scriptable content is validated or sanitized to contain only tags and attributes (such as draw graphics) that are safe for the application, e.g., do not contain scripts and foreignObject. | ➖ n/a | SVG is not an accepted picture format |
+| 1.3.5 | 2 | Verify that the application sanitizes or disables user-supplied scriptable or expression template language content, such as Markdown, CSS or XSL stylesheets, BBCode, or similar. | ➖ n/a | No Markdown, CSS or template content from visitors |
+| 1.3.6 | 2 | Verify that the application protects against Server-side Request Forgery (SSRF) attacks, by validating untrusted data against an allowlist of protocols, domains, paths and ports and sanitizing potentially dangerous characters before using the data to call another service. | ➖ n/a | No request to another service is built from what a visitor sends; the S3 key is made by the app |
+| 1.3.7 | 2 | Verify that the application protects against template injection attacks by not allowing templates to be built based on untrusted input. Where there is no alternative, any untrusted input being included dynamically during template creation must be sanitized or strictly validated. | ✅ Yes | Templates are files of the app; none is built from input |
+| 1.3.8 | 2 | Verify that the application appropriately sanitizes untrusted input before use in Java Naming and Directory Interface (JNDI) queries and that JNDI is configured securely to prevent JNDI injection attacks. | ➖ n/a | No JNDI |
+| 1.3.9 | 2 | Verify that the application sanitizes content before it is sent to memcache to prevent injection attacks. | ➖ n/a | No memcache |
+| 1.3.10 | 2 | Verify that format strings which might resolve in an unexpected or malicious way when used are sanitized before being processed. | ✅ Yes | Log calls pass values as arguments; no format string comes from input |
+| 1.3.11 | 2 | Verify that the application sanitizes user input before passing to mail systems to protect against SMTP or IMAP injection. | ➖ n/a | No mail |
+| 1.3.12 | 3 | Verify that regular expressions are free from elements causing exponential backtracking, and ensure untrusted input is sanitized to mitigate ReDoS or Runaway Regex attacks. | ➖ n/a | The app uses no regular expression |
+
+#### V1.4 Memory, String, and Unmanaged Code
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 1.4.1 | 2 | Verify that the application uses memory-safe string, safer memory copy and pointer arithmetic to detect or prevent stack, buffer, or heap overflows. | ➖ n/a | Python: no unmanaged memory in the app |
+| 1.4.2 | 2 | Verify that sign, range, and input validation techniques are used to prevent integer overflows. | ➖ n/a | Python: integers do not overflow |
+| 1.4.3 | 2 | Verify that dynamically allocated memory and resources are released, and that references or pointers to freed memory are removed or set to null to prevent dangling pointers and use-after-free vulnerabilities. | ➖ n/a | Python: no manual memory management |
+
+#### V1.5 Safe Deserialization
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 1.5.1 | 1 | Verify that the application configures XML parsers to use a restrictive configuration and that unsafe features such as resolving external entities are disabled to prevent XML eXternal Entity (XXE) attacks. | ➖ n/a | No XML is parsed |
+| 1.5.2 | 2 | Verify that deserialization of untrusted data enforces safe input handling, such as using an allowlist of object types or restricting client-defined object types, to prevent deserialization attacks. Deserialization mechanisms that are explicitly defined as insecure must not be used with untrusted input. | ➖ n/a | Nothing a visitor sends is deserialized into objects |
+| 1.5.3 | 3 | Verify that different parsers used in the application for the same data type (e.g., JSON parsers, XML parsers, URL parsers), perform parsing in a consistent way and use the same character encoding mechanism to avoid issues such as JSON Interoperability vulnerabilities or different URI or file parsing behavior being exploited in Remote File Inclusion (RFI) or Server-side Request Forgery (SSRF) attacks. | ✅ Yes | One parser per kind of data: the form by FastAPI, the picture by the signature check |
+
+### V2 Validation and Business Logic
+
+#### V2.1 Validation and Business Logic Documentation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 2.1.1 | 1 | Verify that the application's documentation defines input validation rules for how to check the validity of data items against an expected structure. This could be common data formats such as credit card numbers, email addresses, telephone numbers, or it could be an internal data format. | 🟡 Partly | The rules are in `docs/guestbook.md` and the README, not gathered as a security document |
+| 2.1.2 | 2 | Verify that the application's documentation defines how to validate the logical and contextual consistency of combined data items, such as checking that suburb and ZIP code match. | ➖ n/a | No two fields depend on each other |
+| 2.1.3 | 2 | Verify that expectations for business logic limits and validations are documented, including both per-user and globally across the application. | 🟡 Partly | The limits (lengths, 2 MB, 2 posts a second) are documented in several places, not in one |
+
+#### V2.2 Input Validation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 2.2.1 | 1 | Verify that input is validated to enforce business or functional expectations for that input. This should either use positive validation against an allow list of values, patterns, and ranges, or be based on comparing the input to an expected structure and logical limits according to predefined rules. For L1, this can focus on input which is used to make specific business or security decisions. For L2 and up, this should apply to all input. | ✅ Yes | `domain/message.py` and `domain/picture.py`: lengths, NUL, formats by signature |
+| 2.2.2 | 1 | Verify that the application is designed to enforce input validation at a trusted service layer. While client-side validation improves usability and should be encouraged, it must not be relied upon as a security control. | ✅ Yes | The rules are in the domain, on the server; the form attributes are only a help |
+| 2.2.3 | 2 | Verify that the application ensures that combinations of related data items are reasonable according to the pre-defined rules. | ➖ n/a | No two fields depend on each other |
+
+#### V2.3 Business Logic Security
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 2.3.1 | 1 | Verify that the application will only process business logic flows for the same user in the expected sequential step order and without skipping steps. | ➖ n/a | Signing is one step |
+| 2.3.2 | 2 | Verify that business logic limits are implemented per the application's documentation to avoid business logic flaws being exploited. | ✅ Yes | The documented limits are enforced by the domain, the database constraints and nginx |
+| 2.3.3 | 2 | Verify that transactions are being used at the business logic level such that either a business logic operation succeeds in its entirety or it is rolled back to the previous correct state. | ✅ Yes | One database transaction per message; a picture whose message could not be stored is removed |
+| 2.3.4 | 2 | Verify that business logic level locking mechanisms are used to ensure that limited quantity resources (such as theater seats or delivery slots) cannot be double-booked by manipulating the application's logic. | ➖ n/a | No limited resource to book |
+| 2.3.5 | 3 | Verify that high-value business logic flows require multi-user approval to prevent unauthorized or accidental actions. This could include but is not limited to large monetary transfers, contract approvals, access to classified information, or safety overrides in manufacturing. | ➖ n/a | No high-value operation |
+
+#### V2.4 Anti-automation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 2.4.1 | 2 | Verify that anti-automation controls are in place to protect against excessive calls to application functions that could lead to data exfiltration, garbage-data creation, quota exhaustion, rate-limit breaches, denial-of-service, or overuse of costly resources. | 🟡 Partly | Signing is limited to 2 a second per address (nginx `limit_req`). Reading is not limited |
+| 2.4.2 | 3 | Verify that business logic flows require realistic human timing, preventing excessively rapid transaction submissions. | ❌ No | Nothing measures how fast a visitor fills the form |
+
+### V3 Web Frontend Security
+
+#### V3.1 Web Frontend Security Documentation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 3.1.1 | 3 | Verify that application documentation states the expected security features that browsers using the application must support (such as HTTPS, HTTP Strict Transport Security (HSTS), Content Security Policy (CSP), and other relevant HTTP security mechanisms). It must also define how the application must behave when some of these features are not available (such as warning the user or blocking access). | ❌ No | Not written |
+
+#### V3.2 Unintended Content Interpretation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 3.2.1 | 1 | Verify that security controls are in place to prevent browsers from rendering content or functionality in HTTP responses in an incorrect context (e.g., when an API, a user-uploaded file or other resource is requested directly). Possible controls could include: not serving the content unless HTTP request header fields (such as Sec-Fetch-\*) indicate it is the correct context, using the sandbox directive of the Content-Security-Policy header field or using the attachment disposition type in the Content-Disposition header field. | 🟡 Partly | Pictures are served with their image type and `nosniff`, without a sandboxing policy or `Cross-Origin-Resource-Policy` |
+| 3.2.2 | 1 | Verify that content intended to be displayed as text, rather than rendered as HTML, is handled using safe rendering functions (such as createTextNode or textContent) to prevent unintended execution of content such as HTML or JavaScript. | ✅ Yes | The page writes error texts with `textContent` |
+| 3.2.3 | 3 | Verify that the application avoids DOM clobbering when using client-side JavaScript by employing explicit variable declarations, performing strict type checking, avoiding storing global variables on the document object, and implementing namespace isolation. | ❔ Not checked | The page's script is HTMX and two inline handlers; not reviewed for this |
+
+#### V3.3 Cookie Setup
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 3.3.1 | 1 | Verify that cookies have the 'Secure' attribute set, and if the '__Host-' prefix is not used for the cookie name, the '__Secure-' prefix must be used for the cookie name. | ❌ No | The cookie has no `Secure` attribute: the guestbook is also served over plain HTTP |
+| 3.3.2 | 2 | Verify that each cookie's 'SameSite' attribute value is set according to the purpose of the cookie, to limit exposure to user interface redress attacks and browser-based request forgery attacks, commonly known as cross-site request forgery (CSRF). | ✅ Yes | `SameSite=Strict` |
+| 3.3.3 | 2 | Verify that cookies have the '__Host-' prefix for the cookie name unless they are explicitly designed to be shared with other hosts. | ❌ No | The cookie is `guestbook_csrf`, without the `__Host-` prefix |
+| 3.3.4 | 2 | Verify that if the value of a cookie is not meant to be accessible to client-side scripts (such as a session token), the cookie must have the 'HttpOnly' attribute set and the same value (e. g. session token) must only be transferred to the client via the 'Set-Cookie' header field. | ❌ No | The cookie is `HttpOnly`, but its value is also written in the form |
+| 3.3.5 | 3 | Verify that when the application writes a cookie, the cookie name and value length combined are not over 4096 bytes. Overly large cookies will not be stored by the browser and therefore not sent with requests, preventing the user from using application functionality which relies on that cookie. | ✅ Yes | Name and value are under 100 bytes |
+
+#### V3.4 Browser Security Mechanism Headers
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 3.4.1 | 1 | Verify that a Strict-Transport-Security header field is included on all responses to enforce an HTTP Strict Transport Security (HSTS) policy. A maximum age of at least 1 year must be defined, and for L2 and up, the policy must apply to all subdomains as well. | ❌ No | No `Strict-Transport-Security` header |
+| 3.4.2 | 1 | Verify that the Cross-Origin Resource Sharing (CORS) Access-Control-Allow-Origin header field is a fixed value by the application, or if the Origin HTTP request header field value is used, it is validated against an allowlist of trusted origins. When 'Access-Control-Allow-Origin: \*' needs to be used, verify that the response does not include any sensitive information. | ✅ Yes | The app sends no CORS header |
+| 3.4.3 | 2 | Verify that HTTP responses include a Content-Security-Policy response header field which defines directives to ensure the browser only loads and executes trusted content or resources, in order to limit execution of malicious JavaScript. As a minimum, a global policy must be used which includes the directives object-src 'none' and base-uri 'none' and defines either an allowlist or uses nonces or hashes. For an L3 application, a per-response policy with nonces or hashes must be defined. | ❌ No | No `Content-Security-Policy`; the page has an inline `<style>` and inline `hx-on` handlers |
+| 3.4.4 | 2 | Verify that all HTTP responses contain an 'X-Content-Type-Options: nosniff' header field. This instructs browsers not to use content sniffing and MIME type guessing for the given response, and to require the response's Content-Type header field value to match the destination resource. For example, the response to a request for a style is only accepted if the response's Content-Type is 'text/css'. This also enables the use of the Cross-Origin Read Blocking (CORB) functionality by the browser. | 🟡 Partly | Only on pictures |
+| 3.4.5 | 2 | Verify that the application sets a referrer policy to prevent leakage of technically sensitive data to third-party services via the 'Referer' HTTP request header field. This can be done using the Referrer-Policy HTTP response header field or via HTML element attributes. Sensitive data could include path and query data in the URL, and for internal non-public applications also the hostname. | ❌ No | No referrer policy |
+| 3.4.6 | 2 | Verify that the web application uses the frame-ancestors directive of the Content-Security-Policy header field for every HTTP response to ensure that it cannot be embedded by default and that embedding of specific resources is allowed only when necessary. Note that the X-Frame-Options header field, although supported by browsers, is obsolete and may not be relied upon. | ❌ No | No `frame-ancestors` |
+| 3.4.7 | 3 | Verify that the Content-Security-Policy header field specifies a location to report violations. | ❌ No | No policy, so no reports |
+| 3.4.8 | 3 | Verify that all HTTP responses that initiate a document rendering (such as responses with Content-Type text/html), include the Cross-Origin-Opener-Policy header field with the same-origin directive or the same-origin-allow-popups directive as required. This prevents attacks that abuse shared access to Window objects, such as tabnabbing and frame counting. | ❌ No | No `Cross-Origin-Opener-Policy` |
+
+#### V3.5 Browser Origin Separation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 3.5.1 | 1 | Verify that, if the application does not rely on the CORS preflight mechanism to prevent disallowed cross-origin requests to use sensitive functionality, these requests are validated to ensure they originate from the application itself. This may be done by using and validating anti-forgery tokens or requiring extra HTTP header fields that are not CORS-safelisted request-header fields. This is to defend against browser-based request forgery attacks, commonly known as cross-site request forgery (CSRF). | ✅ Yes | A post needs the token in the cookie and in the form or the `X-CSRF-Token` header (`web/csrf.py`) |
+| 3.5.2 | 1 | Verify that, if the application relies on the CORS preflight mechanism to prevent disallowed cross-origin use of sensitive functionality, it is not possible to call the functionality with a request which does not trigger a CORS-preflight request. This may require checking the values of the 'Origin' and 'Content-Type' request header fields or using an extra header field that is not a CORS-safelisted header-field. | ➖ n/a | The app does not rely on the CORS preflight |
+| 3.5.3 | 1 | Verify that HTTP requests to sensitive functionality use appropriate HTTP methods such as POST, PUT, PATCH, or DELETE, and not methods defined by the HTTP specification as "safe" such as HEAD, OPTIONS, or GET. Alternatively, strict validation of the Sec-Fetch-\* request header fields can be used to ensure that the request did not originate from an inappropriate cross-origin call, a navigation request, or a resource load (such as an image source) where this is not expected. | ✅ Yes | Only `POST /messages` changes anything |
+| 3.5.4 | 2 | Verify that separate applications are hosted on different hostnames to leverage the restrictions provided by same-origin policy, including how documents or scripts loaded by one origin can interact with resources from another origin and hostname-based restrictions on cookies. | 🟡 Partly | In the emulator the guestbook and Floci's console both answer on `localhost`, on different ports. On AWS the guestbook has a name of its own |
+| 3.5.5 | 2 | Verify that messages received by the postMessage interface are discarded if the origin of the message is not trusted, or if the syntax of the message is invalid. | ➖ n/a | No `postMessage` |
+| 3.5.6 | 3 | Verify that JSONP functionality is not enabled anywhere across the application to avoid Cross-Site Script Inclusion (XSSI) attacks. | ✅ Yes | No JSONP |
+| 3.5.7 | 3 | Verify that data requiring authorization is not included in script resource responses, like JavaScript files, to prevent Cross-Site Script Inclusion (XSSI) attacks. | ➖ n/a | No data needs authorization |
+| 3.5.8 | 3 | Verify that authenticated resources (such as images, videos, scripts, and other documents) can be loaded or embedded on behalf of the user only when intended. This can be accomplished by strict validation of the Sec-Fetch-\* HTTP request header fields to ensure that the request did not originate from an inappropriate cross-origin call, or by setting a restrictive Cross-Origin-Resource-Policy HTTP response header field to instruct the browser to block returned content. | ➖ n/a | No authenticated resource |
+
+#### V3.6 External Resource Integrity
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 3.6.1 | 3 | Verify that client-side assets, such as JavaScript libraries, CSS, or web fonts, are only hosted externally (e.g., on a Content Delivery Network) if the resource is static and versioned and Subresource Integrity (SRI) is used to validate the integrity of the asset. If this is not possible, there should be a documented security decision to justify this for each resource. | ✅ Yes | Nothing is loaded from another site: HTMX is a pinned copy served by the app |
+
+#### V3.7 Other Browser Security Considerations
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 3.7.1 | 2 | Verify that the application only uses client-side technologies which are still supported and considered secure. Examples of technologies which do not meet this requirement include NSAPI plugins, Flash, Shockwave, ActiveX, Silverlight, NACL, or client-side Java applets. | ✅ Yes | HTML and HTMX 2 only |
+| 3.7.2 | 2 | Verify that the application will only automatically redirect the user to a different hostname or domain (which is not controlled by the application) where the destination appears on an allowlist. | ✅ Yes | The app never redirects to another host |
+| 3.7.3 | 3 | Verify that the application shows a notification when the user is being redirected to a URL outside of the application's control, with an option to cancel the navigation. | ➖ n/a | The app never sends a visitor to another site |
+| 3.7.4 | 3 | Verify that the application's top-level domain (e.g., site.tld) is added to the public preload list for HTTP Strict Transport Security (HSTS). This ensures that the use of TLS for the application is built directly into the main browsers, rather than relying only on the Strict-Transport-Security response header field. | ❌ No | No real domain yet |
+| 3.7.5 | 3 | Verify that the application behaves as documented (such as warning the user or blocking access) if the browser used to access the application does not support the expected security features. | ❌ No | Nothing documented (3.1.1), so nothing to behave by |
+
+### V4 API and Web Service
+
+#### V4.1 Generic Web Service Security
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 4.1.1 | 1 | Verify that every HTTP response with a message body contains a Content-Type header field that matches the actual content of the response, including the charset parameter to specify safe character encoding (e.g., UTF-8, ISO-8859-1) according to IANA Media Types, such as "text/", "/+xml" and "/xml". | ✅ Yes | Checked on every kind of answer; texts carry `charset=utf-8`. The 404 is JSON |
+| 4.1.2 | 2 | Verify that only user-facing endpoints (intended for manual web-browser access) automatically redirect from HTTP to HTTPS, while other services or endpoints do not implement transparent redirects. This is to avoid a situation where a client is erroneously sending unencrypted HTTP requests, but since the requests are being automatically redirected to HTTPS, the leakage of sensitive data goes undiscovered. | ❌ No | The HTTP listener serves the guestbook; it does not redirect |
+| 4.1.3 | 2 | Verify that any HTTP header field used by the application and set by an intermediary layer, such as a load balancer, a web proxy, or a backend-for-frontend service, cannot be overridden by the end-user. Example headers might include X-Real-IP, X-Forwarded-\*, or X-User-ID. | ✅ Yes | nginx takes the address from `X-Forwarded-For` only when the connection comes from `load_balancer_cidr` |
+| 4.1.4 | 3 | Verify that only HTTP methods that are explicitly supported by the application or its API (including OPTIONS during preflight requests) can be used and that unused methods are blocked. | ✅ Yes | Other methods are answered 405, `TRACE` included |
+| 4.1.5 | 3 | Verify that per-message digital signatures are used to provide additional assurance on top of transport protections for requests or transactions which are highly sensitive or which traverse a number of systems. | ➖ n/a | No highly sensitive transaction |
+
+#### V4.2 HTTP Message Structure Validation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 4.2.1 | 2 | Verify that all application components (including load balancers, firewalls, and application servers) determine boundaries of incoming HTTP messages using the appropriate mechanism for the HTTP version to prevent HTTP request smuggling. In HTTP/1.x, if a Transfer-Encoding header field is present, the Content-Length header must be ignored per RFC 2616. When using HTTP/2 or HTTP/3, if a Content-Length header field is present, the receiver must ensure that it is consistent with the length of the DATA frames. | ❔ Not checked | nginx and gunicorn follow the HTTP rules; the load balancer's handling of bad headers is not set explicitly |
+| 4.2.2 | 3 | Verify that when generating HTTP messages, the Content-Length header field does not conflict with the length of the content as determined by the framing of the HTTP protocol, in order to prevent request smuggling attacks. | ✅ Yes | The app sets no length itself; uvicorn and nginx frame the answers |
+| 4.2.3 | 3 | Verify that the application does not send nor accept HTTP/2 or HTTP/3 messages with connection-specific header fields such as Transfer-Encoding to prevent response splitting and header injection attacks. | ❔ Not checked | HTTP/2 ends at the load balancer; not checked |
+| 4.2.4 | 3 | Verify that the application only accepts HTTP/2 and HTTP/3 requests where the header fields and values do not contain any CR (`\r`), LF (`\n`), or CRLF (`\r\n`) sequences, to prevent header injection attacks. | ❔ Not checked | HTTP/2 ends at the load balancer; not checked |
+| 4.2.5 | 3 | Verify that, if the application (backend or frontend) builds and sends requests, it uses validation, sanitization, or other mechanisms to avoid creating URIs (such as for API calls) or HTTP request header fields (such as Authorization or Cookie), which are too long to be accepted by the receiving component. This could cause a denial of service, such as when sending an overly long request (e.g., a long cookie header field), which results in the server always responding with an error status. | ✅ Yes | The only request the app builds is to S3, with a key of fixed length |
+
+#### V4.3 GraphQL
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 4.3.1 | 2 | Verify that a query allowlist, depth limiting, amount limiting, or query cost analysis is used to prevent GraphQL or data layer expression Denial of Service (DoS) as a result of expensive, nested queries. | ➖ n/a | No GraphQL |
+| 4.3.2 | 2 | Verify that GraphQL introspection queries are disabled in the production environment unless the GraphQL API is meant to be used by other parties. | ➖ n/a | No GraphQL |
+
+#### V4.4 WebSocket
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 4.4.1 | 1 | Verify that WebSocket over TLS (WSS) is used for all WebSocket connections. | ➖ n/a | No WebSocket |
+| 4.4.2 | 2 | Verify that, during the initial HTTP WebSocket handshake, the Origin header field is checked against a list of origins allowed for the application. | ➖ n/a | No WebSocket |
+| 4.4.3 | 2 | Verify that, if the application's standard session management cannot be used, dedicated tokens are being used for this, which comply with the relevant Session Management security requirements. | ➖ n/a | No WebSocket |
+| 4.4.4 | 2 | Verify that dedicated WebSocket session management tokens are initially obtained or validated through the previously authenticated HTTPS session when transitioning an existing HTTPS session to a WebSocket channel. | ➖ n/a | No WebSocket |
+
+### V5 File Handling
+
+#### V5.1 File Handling Documentation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 5.1.1 | 2 | Verify that the documentation defines the permitted file types, expected file extensions, and maximum size (including unpacked size) for each upload feature. Additionally, ensure that the documentation specifies how files are made safe for end-users to download and process, such as how the application behaves when a malicious file is detected. | 🟡 Partly | Formats, extensions and size are documented; how a file is made safe to download is not |
+
+#### V5.2 File Upload and Content
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 5.2.1 | 1 | Verify that the application will only accept files of a size which it can process without causing a loss of performance or a denial of service attack. | ✅ Yes | 2 MB for a picture in the app, 3 MB for a request in nginx |
+| 5.2.2 | 1 | Verify that when the application accepts a file, either on its own or within an archive such as a zip file, it checks if the file extension matches an expected file extension and validates that the contents correspond to the type represented by the extension. This includes, but is not limited to, checking the initial 'magic bytes', performing image re-writing, and using specialized libraries for file content validation. For L1, this can focus just on files which are used to make specific business or security decisions. For L2 and up, this must apply to all files being accepted. | ✅ Yes | The bytes decide the format; the uploaded name is ignored and the stored extension comes from the bytes |
+| 5.2.3 | 2 | Verify that the application checks compressed files (e.g., zip, gz, docx, odt) against maximum allowed uncompressed size and against maximum number of files before uncompressing the file. | ➖ n/a | No compressed file is accepted |
+| 5.2.4 | 3 | Verify that a file size quota and maximum number of files per user are enforced to ensure that a single user cannot fill up the storage with too many files, or excessively large files. | ❌ No | No quota of pictures per visitor |
+| 5.2.5 | 3 | Verify that the application does not allow uploading compressed files containing symlinks unless this is specifically required (in which case it will be necessary to enforce an allowlist of the files that can be symlinked to). | ➖ n/a | No compressed file is accepted |
+| 5.2.6 | 3 | Verify that the application rejects uploaded images with a pixel size larger than the maximum allowed, to prevent pixel flood attacks. | ❌ No | The pixel size is not read |
+
+#### V5.3 File Storage
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 5.3.1 | 1 | Verify that files uploaded or generated by untrusted input and stored in a public folder, are not executed as server-side program code when accessed directly with an HTTP request. | ✅ Yes | Pictures are objects in S3, never files the server could run |
+| 5.3.2 | 1 | Verify that when the application creates file paths for file operations, instead of user-submitted filenames, it uses internally generated or trusted data, or if user-submitted filenames or file metadata must be used, strict validation and sanitization must be applied. This is to protect against path traversal, local or remote file inclusion (LFI, RFI), and server-side request forgery (SSRF) attacks. | ✅ Yes | Keys are made by the app (a UUID and the extension); `is_picture_key` refuses anything else |
+| 5.3.3 | 3 | Verify that server-side file processing, such as file decompression, ignores user-provided path information to prevent vulnerabilities such as zip slip. | ➖ n/a | No file is unpacked |
+
+#### V5.4 File Download
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 5.4.1 | 2 | Verify that the application validates or ignores user-submitted filenames, including in a JSON, JSONP, or URL parameter and specifies a filename in the Content-Disposition header field in the response. | ❌ No | The uploaded name is ignored, but pictures are served without `Content-Disposition` |
+| 5.4.2 | 2 | Verify that file names served (e.g., in HTTP response header fields or email attachments) are encoded or sanitized (e.g., following RFC 6266) to preserve document structure and prevent injection attacks. | ❌ No | No file name is served yet |
+| 5.4.3 | 2 | Verify that files obtained from untrusted sources are scanned by antivirus scanners to prevent serving of known malicious content. | ❌ No | No antivirus scan |
+
+### V6 Authentication
+
+Does not apply: nobody logs in.
+
+#### V6.1 Authentication Documentation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 6.1.1 | 1 | Verify that application documentation defines how controls such as rate limiting, anti-automation, and adaptive response, are used to defend against attacks such as credential stuffing and password brute force. The documentation must make clear how these controls are configured and prevent malicious account lockout. | ➖ n/a | Nobody logs in |
+| 6.1.2 | 2 | Verify that a list of context-specific words is documented in order to prevent their use in passwords. The list could include permutations of organization names, product names, system identifiers, project codenames, department or role names, and similar. | ➖ n/a | Nobody logs in |
+| 6.1.3 | 2 | Verify that, if the application includes multiple authentication pathways, these are all documented together with the security controls and authentication strength which must be consistently enforced across them. | ➖ n/a | Nobody logs in |
+
+#### V6.2 Password Security
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 6.2.1 | 1 | Verify that user set passwords are at least 8 characters in length although a minimum of 15 characters is strongly recommended. | ➖ n/a | Nobody logs in |
+| 6.2.2 | 1 | Verify that users can change their password. | ➖ n/a | Nobody logs in |
+| 6.2.3 | 1 | Verify that password change functionality requires the user's current and new password. | ➖ n/a | Nobody logs in |
+| 6.2.4 | 1 | Verify that passwords submitted during account registration or password change are checked against an available set of, at least, the top 3000 passwords which match the application's password policy, e.g. minimum length. | ➖ n/a | Nobody logs in |
+| 6.2.5 | 1 | Verify that passwords of any composition can be used, without rules limiting the type of characters permitted. There must be no requirement for a minimum number of upper or lower case characters, numbers, or special characters. | ➖ n/a | Nobody logs in |
+| 6.2.6 | 1 | Verify that password input fields use type=password to mask the entry. Applications may allow the user to temporarily view the entire masked password, or the last typed character of the password. | ➖ n/a | Nobody logs in |
+| 6.2.7 | 1 | Verify that "paste" functionality, browser password helpers, and external password managers are permitted. | ➖ n/a | Nobody logs in |
+| 6.2.8 | 1 | Verify that the application verifies the user's password exactly as received from the user, without any modifications such as truncation or case transformation. | ➖ n/a | Nobody logs in |
+| 6.2.9 | 2 | Verify that passwords of at least 64 characters are permitted. | ➖ n/a | Nobody logs in |
+| 6.2.10 | 2 | Verify that a user's password stays valid until it is discovered to be compromised or the user rotates it. The application must not require periodic credential rotation. | ➖ n/a | Nobody logs in |
+| 6.2.11 | 2 | Verify that the documented list of context specific words is used to prevent easy to guess passwords being created. | ➖ n/a | Nobody logs in |
+| 6.2.12 | 2 | Verify that passwords submitted during account registration or password changes are checked against a set of breached passwords. | ➖ n/a | Nobody logs in |
+
+#### V6.3 General Authentication Security
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 6.3.1 | 1 | Verify that controls to prevent attacks such as credential stuffing and password brute force are implemented according to the application's security documentation. | ➖ n/a | Nobody logs in |
+| 6.3.2 | 1 | Verify that default user accounts (e.g., "root", "admin", or "sa") are not present in the application or are disabled. | ➖ n/a | Nobody logs in |
+| 6.3.3 | 2 | Verify that either a multi-factor authentication mechanism or a combination of single-factor authentication mechanisms, must be used in order to access the application. For L3, one of the factors must be a hardware-based authentication mechanism which provides compromise and impersonation resistance against phishing attacks while verifying the intent to authenticate by requiring a user-initiated action (such as a button press on a FIDO hardware key or a mobile phone). Relaxing any of the considerations in this requirement requires a fully documented rationale and a comprehensive set of mitigating controls. | ➖ n/a | Nobody logs in |
+| 6.3.4 | 2 | Verify that, if the application includes multiple authentication pathways, there are no undocumented pathways and that security controls and authentication strength are enforced consistently. | ➖ n/a | Nobody logs in |
+| 6.3.5 | 3 | Verify that users are notified of suspicious authentication attempts (successful or unsuccessful). This may include authentication attempts from an unusual location or client, partially successful authentication (only one of multiple factors), an authentication attempt after a long period of inactivity or a successful authentication after several unsuccessful attempts. | ➖ n/a | Nobody logs in |
+| 6.3.6 | 3 | Verify that email is not used as either a single-factor or multi-factor authentication mechanism. | ➖ n/a | Nobody logs in |
+| 6.3.7 | 3 | Verify that users are notified after updates to authentication details, such as credential resets or modification of the username or email address. | ➖ n/a | Nobody logs in |
+| 6.3.8 | 3 | Verify that valid users cannot be deduced from failed authentication challenges, such as by basing on error messages, HTTP response codes, or different response times. Registration and forgot password functionality must also have this protection. | ➖ n/a | Nobody logs in |
+
+#### V6.4 Authentication Factor Lifecycle and Recovery
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 6.4.1 | 1 | Verify that system generated initial passwords or activation codes are securely randomly generated, follow the existing password policy, and expire after a short period of time or after they are initially used. These initial secrets must not be permitted to become the long term password. | ➖ n/a | Nobody logs in |
+| 6.4.2 | 1 | Verify that password hints or knowledge-based authentication (so-called "secret questions") are not present. | ➖ n/a | Nobody logs in |
+| 6.4.3 | 2 | Verify that a secure process for resetting a forgotten password is implemented, that does not bypass any enabled multi-factor authentication mechanisms. | ➖ n/a | Nobody logs in |
+| 6.4.4 | 2 | Verify that if a multi-factor authentication factor is lost, evidence of identity proofing is performed at the same level as during enrollment. | ➖ n/a | Nobody logs in |
+| 6.4.5 | 3 | Verify that renewal instructions for authentication mechanisms which expire are sent with enough time to be carried out before the old authentication mechanism expires, configuring automated reminders if necessary. | ➖ n/a | Nobody logs in |
+| 6.4.6 | 3 | Verify that administrative users can initiate the password reset process for the user, but that this does not allow them to change or choose the user's password. This prevents a situation where they know the user's password. | ➖ n/a | Nobody logs in |
+
+#### V6.5 General Multi-factor authentication requirements
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 6.5.1 | 2 | Verify that lookup secrets, out-of-band authentication requests or codes, and time-based one-time passwords (TOTPs) are only successfully usable once. | ➖ n/a | Nobody logs in |
+| 6.5.2 | 2 | Verify that, when being stored in the application's backend, lookup secrets with less than 112 bits of entropy (19 random alphanumeric characters or 34 random digits) are hashed with an approved password storage hashing algorithm that incorporates a 32-bit random salt. A standard hash function can be used if the secret has 112 bits of entropy or more. | ➖ n/a | Nobody logs in |
+| 6.5.3 | 2 | Verify that lookup secrets, out-of-band authentication code, and time-based one-time password seeds, are generated using a Cryptographically Secure Pseudorandom Number Generator (CSPRNG) to avoid predictable values. | ➖ n/a | Nobody logs in |
+| 6.5.4 | 2 | Verify that lookup secrets and out-of-band authentication codes have a minimum of 20 bits of entropy (typically 4 random alphanumeric characters or 6 random digits is sufficient). | ➖ n/a | Nobody logs in |
+| 6.5.5 | 2 | Verify that out-of-band authentication requests, codes, or tokens, as well as time-based one-time passwords (TOTPs) have a defined lifetime. Out of band requests must have a maximum lifetime of 10 minutes and for TOTP a maximum lifetime of 30 seconds. | ➖ n/a | Nobody logs in |
+| 6.5.6 | 3 | Verify that any authentication factor (including physical devices) can be revoked in case of theft or other loss. | ➖ n/a | Nobody logs in |
+| 6.5.7 | 3 | Verify that biometric authentication mechanisms are only used as secondary factors together with either something you have or something you know. | ➖ n/a | Nobody logs in |
+| 6.5.8 | 3 | Verify that time-based one-time passwords (TOTPs) are checked based on a time source from a trusted service and not from an untrusted or client provided time. | ➖ n/a | Nobody logs in |
+
+#### V6.6 Out-of-Band authentication mechanisms
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 6.6.1 | 2 | Verify that authentication mechanisms using the Public Switched Telephone Network (PSTN) to deliver One-time Passwords (OTPs) via phone or SMS are offered only when the phone number has previously been validated, alternate stronger methods (such as Time based One-time Passwords) are also offered, and the service provides information on their security risks to users. For L3 applications, phone and SMS must not be available as options. | ➖ n/a | Nobody logs in |
+| 6.6.2 | 2 | Verify that out-of-band authentication requests, codes, or tokens are bound to the original authentication request for which they were generated and are not usable for a previous or subsequent one. | ➖ n/a | Nobody logs in |
+| 6.6.3 | 2 | Verify that a code based out-of-band authentication mechanism is protected against brute force attacks by using rate limiting. Consider also using a code with at least 64 bits of entropy. | ➖ n/a | Nobody logs in |
+| 6.6.4 | 3 | Verify that, where push notifications are used for multi-factor authentication, rate limiting is used to prevent push bombing attacks. Number matching may also mitigate this risk. | ➖ n/a | Nobody logs in |
+
+#### V6.7 Cryptographic authentication mechanism
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 6.7.1 | 3 | Verify that the certificates used to verify cryptographic authentication assertions are stored in a way protects them from modification. | ➖ n/a | Nobody logs in |
+| 6.7.2 | 3 | Verify that the challenge nonce is at least 64 bits in length, and statistically unique or unique over the lifetime of the cryptographic device. | ➖ n/a | Nobody logs in |
+
+#### V6.8 Authentication with an Identity Provider
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 6.8.1 | 2 | Verify that, if the application supports multiple identity providers (IdPs), the user's identity cannot be spoofed via another supported identity provider (eg. by using the same user identifier). The standard mitigation would be for the application to register and identify the user using a combination of the IdP ID (serving as a namespace) and the user's ID in the IdP. | ➖ n/a | Nobody logs in |
+| 6.8.2 | 2 | Verify that the presence and integrity of digital signatures on authentication assertions (for example on JWTs or SAML assertions) are always validated, rejecting any assertions that are unsigned or have invalid signatures. | ➖ n/a | Nobody logs in |
+| 6.8.3 | 2 | Verify that SAML assertions are uniquely processed and used only once within the validity period to prevent replay attacks. | ➖ n/a | Nobody logs in |
+| 6.8.4 | 2 | Verify that, if an application uses a separate Identity Provider (IdP) and expects specific authentication strength, methods, or recentness for specific functions, the application verifies this using the information returned by the IdP. For example, if OIDC is used, this might be achieved by validating ID Token claims such as 'acr', 'amr', and 'auth_time'(if present). If the IdP does not provide this information, the application must have a documented fallback approach that assumes that the minimum strength authentication mechanism was used (for example, single-factor authentication using username and password). | ➖ n/a | Nobody logs in |
+
+### V7 Session Management
+
+Does not apply: no sessions.
+
+#### V7.1 Session Management Documentation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 7.1.1 | 2 | Verify that the user's session inactivity timeout and absolute maximum session lifetime are documented, are appropriate in combination with other controls, and that the documentation includes justification for any deviations from NIST SP 800-63B re-authentication requirements. | ➖ n/a | No sessions |
+| 7.1.2 | 2 | Verify that the documentation defines how many concurrent (parallel) sessions are allowed for one account as well as the intended behaviors and actions to be taken when the maximum number of active sessions is reached. | ➖ n/a | No sessions |
+| 7.1.3 | 2 | Verify that all systems that create and manage user sessions as part of a federated identity management ecosystem (such as SSO systems) are documented along with controls to coordinate session lifetimes, termination, and any other conditions that require re-authentication. | ➖ n/a | No sessions |
+
+#### V7.2 Fundamental Session Management Security
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 7.2.1 | 1 | Verify that the application performs all session token verification using a trusted, backend service. | ➖ n/a | No sessions |
+| 7.2.2 | 1 | Verify that the application uses either self-contained or reference tokens that are dynamically generated for session management, i.e. not using static API secrets and keys. | ➖ n/a | No sessions |
+| 7.2.3 | 1 | Verify that if reference tokens are used to represent user sessions, they are unique and generated using a cryptographically secure pseudo-random number generator (CSPRNG) and possess at least 128 bits of entropy. | ➖ n/a | No sessions |
+| 7.2.4 | 1 | Verify that the application generates a new session token on user authentication, including re-authentication, and terminates the current session token. | ➖ n/a | No sessions |
+
+#### V7.3 Session Timeout
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 7.3.1 | 2 | Verify that there is an inactivity timeout such that re-authentication is enforced according to risk analysis and documented security decisions. | ➖ n/a | No sessions |
+| 7.3.2 | 2 | Verify that there is an absolute maximum session lifetime such that re-authentication is enforced according to risk analysis and documented security decisions. | ➖ n/a | No sessions |
+
+#### V7.4 Session Termination
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 7.4.1 | 1 | Verify that when session termination is triggered (such as logout or expiration), the application disallows any further use of the session. For reference tokens or stateful sessions, this means invalidating the session data at the application backend. Applications using self-contained tokens will need a solution such as maintaining a list of terminated tokens, disallowing tokens produced before a per-user date and time or rotating a per-user signing key. | ➖ n/a | No sessions |
+| 7.4.2 | 1 | Verify that the application terminates all active sessions when a user account is disabled or deleted (such as an employee leaving the company). | ➖ n/a | No sessions |
+| 7.4.3 | 2 | Verify that the application gives the option to terminate all other active sessions after a successful change or removal of any authentication factor (including password change via reset or recovery and, if present, an MFA settings update). | ➖ n/a | No sessions |
+| 7.4.4 | 2 | Verify that all pages that require authentication have easy and visible access to logout functionality. | ➖ n/a | No sessions |
+| 7.4.5 | 2 | Verify that application administrators are able to terminate active sessions for an individual user or for all users. | ➖ n/a | No sessions |
+
+#### V7.5 Defenses Against Session Abuse
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 7.5.1 | 2 | Verify that the application requires full re-authentication before allowing modifications to sensitive account attributes which may affect authentication such as email address, phone number, MFA configuration, or other information used in account recovery. | ➖ n/a | No sessions |
+| 7.5.2 | 2 | Verify that users are able to view and (having authenticated again with at least one factor) terminate any or all currently active sessions. | ➖ n/a | No sessions |
+| 7.5.3 | 3 | Verify that the application requires further authentication with at least one factor or secondary verification before performing highly sensitive transactions or operations. | ➖ n/a | No sessions |
+
+#### V7.6 Federated Re-authentication
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 7.6.1 | 2 | Verify that session lifetime and termination between Relying Parties (RPs) and Identity Providers (IdPs) behave as documented, requiring re-authentication as necessary such as when the maximum time between IdP authentication events is reached. | ➖ n/a | No sessions |
+| 7.6.2 | 2 | Verify that creation of a session requires either the user's consent or an explicit action, preventing the creation of new application sessions without user interaction. | ➖ n/a | No sessions |
+
+### V8 Authorization
+
+Does not apply: everything is public; nobody has more rights than anybody else.
+
+#### V8.1 Authorization Documentation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 8.1.1 | 1 | Verify that authorization documentation defines rules for restricting function-level and data-specific access based on consumer permissions and resource attributes. | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+| 8.1.2 | 2 | Verify that authorization documentation defines rules for field-level access restrictions (both read and write) based on consumer permissions and resource attributes. Note that these rules might depend on other attribute values of the relevant data object, such as state or status. | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+| 8.1.3 | 3 | Verify that the application's documentation defines the environmental and contextual attributes (including but not limited to, time of day, user location, IP address, or device) that are used in the application to make security decisions, including those pertaining to authentication and authorization. | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+| 8.1.4 | 3 | Verify that authentication and authorization documentation defines how environmental and contextual factors are used in decision-making, in addition to function-level, data-specific, and field-level authorization. This should include the attributes evaluated, thresholds for risk, and actions taken (e.g., allow, challenge, deny, step-up authentication). | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+
+#### V8.2 General Authorization Design
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 8.2.1 | 1 | Verify that the application ensures that function-level access is restricted to consumers with explicit permissions. | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+| 8.2.2 | 1 | Verify that the application ensures that data-specific access is restricted to consumers with explicit permissions to specific data items to mitigate insecure direct object reference (IDOR) and broken object level authorization (BOLA). | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+| 8.2.3 | 2 | Verify that the application ensures that field-level access is restricted to consumers with explicit permissions to specific fields to mitigate broken object property level authorization (BOPLA). | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+| 8.2.4 | 3 | Verify that adaptive security controls based on a consumer's environmental and contextual attributes (such as time of day, location, IP address, or device) are implemented for authentication and authorization decisions, as defined in the application's documentation. These controls must be applied when the consumer tries to start a new session and also during an existing session. | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+
+#### V8.3 Operation Level Authorization
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 8.3.1 | 1 | Verify that the application enforces authorization rules at a trusted service layer and doesn't rely on controls that an untrusted consumer could manipulate, such as client-side JavaScript. | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+| 8.3.2 | 3 | Verify that changes to values on which authorization decisions are made are applied immediately. Where changes cannot be applied immediately, (such as when relying on data in self-contained tokens), there must be mitigating controls to alert when a consumer performs an action when they are no longer authorized to do so and revert the change. Note that this alternative would not mitigate information leakage. | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+| 8.3.3 | 3 | Verify that access to an object is based on the originating subject's (e.g. consumer's) permissions, not on the permissions of any intermediary or service acting on their behalf. For example, if a consumer calls a web service using a self-contained token for authentication, and the service then requests data from a different service, the second service will use the consumer's token, rather than a machine-to-machine token from the first service, to make permission decisions. | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+
+#### V8.4 Other Authorization Considerations
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 8.4.1 | 2 | Verify that multi-tenant applications use cross-tenant controls to ensure consumer operations will never affect tenants with which they do not have permissions to interact. | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+| 8.4.2 | 3 | Verify that access to administrative interfaces incorporates multiple layers of security, including continuous consumer identity verification, device security posture assessment, and contextual risk analysis, ensuring that network location or trusted endpoints are not the sole factors for authorization even though they may reduce the likelihood of unauthorized access. | ➖ n/a | Everything is public; nobody has more rights than anybody else |
+
+### V9 Self-contained Tokens
+
+Does not apply: no JWT or similar token.
+
+#### V9.1 Token source and integrity
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 9.1.1 | 1 | Verify that self-contained tokens are validated using their digital signature or MAC to protect against tampering before accepting the token's contents. | ➖ n/a | No JWT or similar token |
+| 9.1.2 | 1 | Verify that only algorithms on an allowlist can be used to create and verify self-contained tokens, for a given context. The allowlist must include the permitted algorithms, ideally only either symmetric or asymmetric algorithms, and must not include the 'None' algorithm. If both symmetric and asymmetric must be supported, additional controls will be needed to prevent key confusion. | ➖ n/a | No JWT or similar token |
+| 9.1.3 | 1 | Verify that key material that is used to validate self-contained tokens is from trusted pre-configured sources for the token issuer, preventing attackers from specifying untrusted sources and keys. For JWTs and other JWS structures, headers such as 'jku', 'x5u', and 'jwk' must be validated against an allowlist of trusted sources. | ➖ n/a | No JWT or similar token |
+
+#### V9.2 Token content
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 9.2.1 | 1 | Verify that, if a validity time span is present in the token data, the token and its content are accepted only if the verification time is within this validity time span. For example, for JWTs, the claims 'nbf' and 'exp' must be verified. | ➖ n/a | No JWT or similar token |
+| 9.2.2 | 2 | Verify that the service receiving a token validates the token to be the correct type and is meant for the intended purpose before accepting the token's contents. For example, only access tokens can be accepted for authorization decisions and only ID Tokens can be used for proving user authentication. | ➖ n/a | No JWT or similar token |
+| 9.2.3 | 2 | Verify that the service only accepts tokens which are intended for use with that service (audience). For JWTs, this can be achieved by validating the 'aud' claim against an allowlist defined in the service. | ➖ n/a | No JWT or similar token |
+| 9.2.4 | 2 | Verify that, if a token issuer uses the same private key for issuing tokens to different audiences, the issued tokens contain an audience restriction that uniquely identifies the intended audiences. This will prevent a token from being reused with an unintended audience. If the audience identifier is dynamically provisioned, the token issuer must validate these audiences in order to make sure that they do not result in audience impersonation. | ➖ n/a | No JWT or similar token |
+
+### V10 OAuth and OIDC
+
+Does not apply: no OAuth, no OIDC.
+
+#### V10.1 Generic OAuth and OIDC Security
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 10.1.1 | 2 | Verify that tokens are only sent to components that strictly need them. For example, when using a backend-for-frontend pattern for browser-based JavaScript applications, access and refresh tokens shall only be accessible for the backend. | ➖ n/a | No OAuth, no OIDC |
+| 10.1.2 | 2 | Verify that the client only accepts values from the authorization server (such as the authorization code or ID Token) if these values result from an authorization flow that was initiated by the same user agent session and transaction. This requires that client-generated secrets, such as the proof key for code exchange (PKCE) 'code_verifier', 'state' or OIDC 'nonce', are not guessable, are specific to the transaction, and are securely bound to both the client and the user agent session in which the transaction was started. | ➖ n/a | No OAuth, no OIDC |
+
+#### V10.2 OAuth Client
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 10.2.1 | 2 | Verify that, if the code flow is used, the OAuth client has protection against browser-based request forgery attacks, commonly known as cross-site request forgery (CSRF), which trigger token requests, either by using proof key for code exchange (PKCE) functionality or checking the 'state' parameter that was sent in the authorization request. | ➖ n/a | No OAuth, no OIDC |
+| 10.2.2 | 2 | Verify that, if the OAuth client can interact with more than one authorization server, it has a defense against mix-up attacks. For example, it could require that the authorization server return the 'iss' parameter value and validate it in the authorization response and the token response. | ➖ n/a | No OAuth, no OIDC |
+| 10.2.3 | 3 | Verify that the OAuth client only requests the required scopes (or other authorization parameters) in requests to the authorization server. | ➖ n/a | No OAuth, no OIDC |
+
+#### V10.3 OAuth Resource Server
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 10.3.1 | 2 | Verify that the resource server only accepts access tokens that are intended for use with that service (audience). The audience may be included in a structured access token (such as the 'aud' claim in JWT), or it can be checked using the token introspection endpoint. | ➖ n/a | No OAuth, no OIDC |
+| 10.3.2 | 2 | Verify that the resource server enforces authorization decisions based on claims from the access token that define delegated authorization. If claims such as 'sub', 'scope', and 'authorization_details' are present, they must be part of the decision. | ➖ n/a | No OAuth, no OIDC |
+| 10.3.3 | 2 | Verify that if an access control decision requires identifying a unique user from an access token (JWT or related token introspection response), the resource server identifies the user from claims that cannot be reassigned to other users. Typically, it means using a combination of 'iss' and 'sub' claims. | ➖ n/a | No OAuth, no OIDC |
+| 10.3.4 | 2 | Verify that, if the resource server requires specific authentication strength, methods, or recentness, it verifies that the presented access token satisfies these constraints. For example, if present, using the OIDC 'acr', 'amr' and 'auth_time' claims respectively. | ➖ n/a | No OAuth, no OIDC |
+| 10.3.5 | 3 | Verify that the resource server prevents the use of stolen access tokens or replay of access tokens (from unauthorized parties) by requiring sender-constrained access tokens, either Mutual TLS for OAuth 2 or OAuth 2 Demonstration of Proof of Possession (DPoP). | ➖ n/a | No OAuth, no OIDC |
+
+#### V10.4 OAuth Authorization Server
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 10.4.1 | 1 | Verify that the authorization server validates redirect URIs based on a client-specific allowlist of pre-registered URIs using exact string comparison. | ➖ n/a | No OAuth, no OIDC |
+| 10.4.2 | 1 | Verify that, if the authorization server returns the authorization code in the authorization response, it can be used only once for a token request. For the second valid request with an authorization code that has already been used to issue an access token, the authorization server must reject a token request and revoke any issued tokens related to the authorization code. | ➖ n/a | No OAuth, no OIDC |
+| 10.4.3 | 1 | Verify that the authorization code is short-lived. The maximum lifetime can be up to 10 minutes for L1 and L2 applications and up to 1 minute for L3 applications. | ➖ n/a | No OAuth, no OIDC |
+| 10.4.4 | 1 | Verify that for a given client, the authorization server only allows the usage of grants that this client needs to use. Note that the grants 'token'(Implicit flow) and 'password'(Resource Owner Password Credentials flow) must no longer be used. | ➖ n/a | No OAuth, no OIDC |
+| 10.4.5 | 1 | Verify that the authorization server mitigates refresh token replay attacks for public clients, preferably using sender-constrained refresh tokens, i.e., Demonstrating Proof of Possession (DPoP) or Certificate-Bound Access Tokens using mutual TLS (mTLS). For L1 and L2 applications, refresh token rotation may be used. If refresh token rotation is used, the authorization server must invalidate the refresh token after usage, and revoke all refresh tokens for that authorization if an already used and invalidated refresh token is provided. | ➖ n/a | No OAuth, no OIDC |
+| 10.4.6 | 2 | Verify that, if the code grant is used, the authorization server mitigates authorization code interception attacks by requiring proof key for code exchange (PKCE). For authorization requests, the authorization server must require a valid 'code_challenge' value and must not accept a 'code_challenge_method' value of 'plain'. For a token request, it must require validation of the 'code_verifier' parameter. | ➖ n/a | No OAuth, no OIDC |
+| 10.4.7 | 2 | Verify that if the authorization server supports unauthenticated dynamic client registration, it mitigates the risk of malicious client applications. It must validate client metadata such as any registered URIs, ensure the user's consent, and warn the user before processing an authorization request with an untrusted client application. | ➖ n/a | No OAuth, no OIDC |
+| 10.4.8 | 2 | Verify that refresh tokens have an absolute expiration, including if sliding refresh token expiration is applied. | ➖ n/a | No OAuth, no OIDC |
+| 10.4.9 | 2 | Verify that refresh tokens and reference access tokens can be revoked by an authorized user using the authorization server user interface, to mitigate the risk of malicious clients or stolen tokens. | ➖ n/a | No OAuth, no OIDC |
+| 10.4.10 | 2 | Verify that confidential client is authenticated for client-to-authorized server backchannel requests such as token requests, pushed authorization requests (PAR), and token revocation requests. | ➖ n/a | No OAuth, no OIDC |
+| 10.4.11 | 2 | Verify that the authorization server configuration only assigns the required scopes to the OAuth client. | ➖ n/a | No OAuth, no OIDC |
+| 10.4.12 | 3 | Verify that for a given client, the authorization server only allows the 'response_mode' value that this client needs to use. For example, by having the authorization server validate this value against the expected values or by using pushed authorization request (PAR) or JWT-secured Authorization Request (JAR). | ➖ n/a | No OAuth, no OIDC |
+| 10.4.13 | 3 | Verify that grant type 'code' is always used together with pushed authorization requests (PAR). | ➖ n/a | No OAuth, no OIDC |
+| 10.4.14 | 3 | Verify that the authorization server issues only sender-constrained (Proof-of-Possession) access tokens, either with certificate-bound access tokens using mutual TLS (mTLS) or DPoP-bound access tokens (Demonstration of Proof of Possession). | ➖ n/a | No OAuth, no OIDC |
+| 10.4.15 | 3 | Verify that, for a server-side client (which is not executed on the end-user device), the authorization server ensures that the 'authorization_details' parameter value is from the client backend and that the user has not tampered with it. For example, by requiring the usage of pushed authorization request (PAR) or JWT-secured Authorization Request (JAR). | ➖ n/a | No OAuth, no OIDC |
+| 10.4.16 | 3 | Verify that the client is confidential and the authorization server requires the use of strong client authentication methods (based on public-key cryptography and resistant to replay attacks), such as mutual TLS ( 'tls_client_auth', 'self_signed_tls_client_auth') or private key JWT ( 'private_key_jwt'). | ➖ n/a | No OAuth, no OIDC |
+
+#### V10.5 OIDC Client
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 10.5.1 | 2 | Verify that the client (as the relying party) mitigates ID Token replay attacks. For example, by ensuring that the 'nonce' claim in the ID Token matches the 'nonce' value sent in the authentication request to the OpenID Provider (in OAuth2 refereed to as the authorization request sent to the authorization server). | ➖ n/a | No OAuth, no OIDC |
+| 10.5.2 | 2 | Verify that the client uniquely identifies the user from ID Token claims, usually the 'sub' claim, which cannot be reassigned to other users (for the scope of an identity provider). | ➖ n/a | No OAuth, no OIDC |
+| 10.5.3 | 2 | Verify that the client rejects attempts by a malicious authorization server to impersonate another authorization server through authorization server metadata. The client must reject authorization server metadata if the issuer URL in the authorization server metadata does not exactly match the pre-configured issuer URL expected by the client. | ➖ n/a | No OAuth, no OIDC |
+| 10.5.4 | 2 | Verify that the client validates that the ID Token is intended to be used for that client (audience) by checking that the 'aud' claim from the token is equal to the 'client_id' value for the client. | ➖ n/a | No OAuth, no OIDC |
+| 10.5.5 | 2 | Verify that, when using OIDC back-channel logout, the relying party mitigates denial of service through forced logout and cross-JWT confusion in the logout flow. The client must verify that the logout token is correctly typed with a value of 'logout+jwt', contains the 'event' claim with the correct member name, and does not contain a 'nonce' claim. Note that it is also recommended to have a short expiration (e.g., 2 minutes). | ➖ n/a | No OAuth, no OIDC |
+
+#### V10.6 OpenID Provider
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 10.6.1 | 2 | Verify that the OpenID Provider only allows values 'code', 'ciba', 'id_token', or 'id_token code' for response mode. Note that 'code' is preferred over 'id_token code'(the OIDC Hybrid flow), and 'token'(any Implicit flow) must not be used. | ➖ n/a | No OAuth, no OIDC |
+| 10.6.2 | 2 | Verify that the OpenID Provider mitigates denial of service through forced logout. By obtaining explicit confirmation from the end-user or, if present, validating parameters in the logout request (initiated by the relying party), such as the 'id_token_hint'. | ➖ n/a | No OAuth, no OIDC |
+
+#### V10.7 Consent Management
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 10.7.1 | 2 | Verify that the authorization server ensures that the user consents to each authorization request. If the identity of the client cannot be assured, the authorization server must always explicitly prompt the user for consent. | ➖ n/a | No OAuth, no OIDC |
+| 10.7.2 | 2 | Verify that when the authorization server prompts for user consent, it presents sufficient and clear information about what is being consented to. When applicable, this should include the nature of the requested authorizations (typically based on scope, resource server, Rich Authorization Requests (RAR) authorization details), the identity of the authorized application, and the lifetime of these authorizations. | ➖ n/a | No OAuth, no OIDC |
+| 10.7.3 | 2 | Verify that the user can review, modify, and revoke consents which the user has granted through the authorization server. | ➖ n/a | No OAuth, no OIDC |
+
+### V11 Cryptography
+
+#### V11.1 Cryptographic Inventory and Documentation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 11.1.1 | 2 | Verify that there is a documented policy for management of cryptographic keys and a cryptographic key lifecycle that follows a key management standard such as NIST SP 800-57. This should include ensuring that keys are not overshared (for example, with more than two entities for shared secrets and more than one entity for private keys). | ❌ No | No written key policy |
+| 11.1.2 | 2 | Verify that a cryptographic inventory is performed, maintained, regularly updated, and includes all cryptographic keys, algorithms, and certificates used by the application. It must also document where keys can and cannot be used in the system, and the types of data that can and cannot be protected using the keys. | ❌ No | No inventory of keys, algorithms and certificates |
+| 11.1.3 | 3 | Verify that cryptographic discovery mechanisms are employed to identify all instances of cryptography in the system, including encryption, hashing, and signing operations. | ❌ No | No discovery mechanism |
+| 11.1.4 | 3 | Verify that a cryptographic inventory is maintained. This must include a documented plan that outlines the migration path to new cryptographic standards, such as post-quantum cryptography, in order to react to future threats. | ❌ No | No inventory, no migration plan |
+
+#### V11.2 Secure Cryptography Implementation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 11.2.1 | 2 | Verify that industry-validated implementations (including libraries and hardware-accelerated implementations) are used for cryptographic operations. | ✅ Yes | Python's `secrets` and `hmac`, OpenSSL, and AWS for TLS |
+| 11.2.2 | 2 | Verify that the application is designed with crypto agility such that random number, authenticated encryption, MAC, or hashing algorithms, key lengths, rounds, ciphers and modes can be reconfigured, upgraded, or swapped at any time, to protect against cryptographic breaks. Similarly, it must also be possible to replace keys and passwords and re-encrypt data. This will allow for seamless upgrades to post-quantum cryptography (PQC), once high-assurance implementations of approved PQC schemes or standards are widely available. | ✅ Yes | The TLS policy is one Terraform setting and the token is one function |
+| 11.2.3 | 2 | Verify that all cryptographic primitives utilize a minimum of 128-bits of security based on the algorithm, key size, and configuration. For example, a 256-bit ECC key provides roughly 128 bits of security where RSA requires a 3072-bit key to achieve 128 bits of security. | ✅ Yes | The token has 256 random bits; the SSH key is ED25519 |
+| 11.2.4 | 3 | Verify that all cryptographic operations are constant-time, with no 'short-circuit' operations in comparisons, calculations, or returns, to avoid leaking information. | ✅ Yes | The token is compared with `hmac.compare_digest` |
+| 11.2.5 | 3 | Verify that all cryptographic modules fail securely, and errors are handled in a way that does not enable vulnerabilities, such as Padding Oracle attacks. | ➖ n/a | The app encrypts and decrypts nothing itself |
+
+#### V11.3 Encryption Algorithms
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 11.3.1 | 1 | Verify that insecure block modes (e.g., ECB) and weak padding schemes (e.g., PKCS#1 v1.5) are not used. | ➖ n/a | The app encrypts nothing itself |
+| 11.3.2 | 1 | Verify that only approved ciphers and modes such as AES with GCM are used. | ➖ n/a | The app encrypts nothing itself |
+| 11.3.3 | 2 | Verify that encrypted data is protected against unauthorized modification preferably by using an approved authenticated encryption method or by combining an approved encryption method with an approved MAC algorithm. | ➖ n/a | The app encrypts nothing itself |
+| 11.3.4 | 3 | Verify that nonces, initialization vectors, and other single-use numbers are not used for more than one encryption key and data-element pair. The method of generation must be appropriate for the algorithm being used. | ➖ n/a | The app encrypts nothing itself |
+| 11.3.5 | 3 | Verify that any combination of an encryption algorithm and a MAC algorithm is operating in encrypt-then-MAC mode. | ➖ n/a | The app encrypts nothing itself |
+
+#### V11.4 Hashing and Hash-based Functions
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 11.4.1 | 1 | Verify that only approved hash functions are used for general cryptographic use cases, including digital signatures, HMAC, KDF, and random bit generation. Disallowed hash functions, such as MD5, must not be used for any cryptographic purpose. | ✅ Yes | No MD5 or SHA-1 anywhere in the app |
+| 11.4.2 | 2 | Verify that passwords are stored using an approved, computationally intensive, key derivation function (also known as a "password hashing function"), with parameter settings configured based on current guidance. The settings should balance security and performance to make brute-force attacks sufficiently challenging for the required level of security. | ➖ n/a | No passwords |
+| 11.4.3 | 2 | Verify that hash functions used in digital signatures, as part of data authentication or data integrity are collision resistant and have appropriate bit-lengths. If collision resistance is required, the output length must be at least 256 bits. If only resistance to second pre-image attacks is required, the output length must be at least 128 bits. | ➖ n/a | The app signs nothing |
+| 11.4.4 | 2 | Verify that the application uses approved key derivation functions with key stretching parameters when deriving secret keys from passwords. The parameters in use must balance security and performance to prevent brute-force attacks from compromising the resulting cryptographic key. | ➖ n/a | No key is derived from a password |
+
+#### V11.5 Random Values
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 11.5.1 | 2 | Verify that all random numbers and strings which are intended to be non-guessable must be generated using a cryptographically secure pseudo-random number generator (CSPRNG) and have at least 128 bits of entropy. Note that UUIDs do not respect this condition. | ✅ Yes | The token comes from `secrets.token_urlsafe(32)`. Picture keys are UUIDs, public by intent |
+| 11.5.2 | 3 | Verify that the random number generation mechanism in use is designed to work securely, even under heavy demand. | ✅ Yes | The operating system's generator |
+
+#### V11.6 Public Key Cryptography
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 11.6.1 | 2 | Verify that only approved cryptographic algorithms and modes of operation are used for key generation and seeding, and digital signature generation and verification. Key generation algorithms must not generate insecure keys vulnerable to known attacks, for example, RSA keys which are vulnerable to Fermat factorization. | ✅ Yes | ED25519 for the SSH key, made by the Terraform `tls` provider |
+| 11.6.2 | 3 | Verify that approved cryptographic algorithms are used for key exchange (such as Diffie-Hellman) with a focus on ensuring that key exchange mechanisms use secure parameters. This will prevent attacks on the key establishment process which could lead to adversary-in-the-middle attacks or cryptographic breaks. | 🟡 Partly | Set by the listener's TLS policy; only a deployment on AWS shows it |
+
+#### V11.7 In-Use Data Cryptography
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 11.7.1 | 3 | Verify that full memory encryption is in use that protects sensitive data while it is in use, preventing access by unauthorized users or processes. | ❌ No | No memory encryption |
+| 11.7.2 | 3 | Verify that data minimization ensures the minimal amount of data is exposed during processing, and ensure that data is encrypted immediately after use or as soon as feasible. | ➖ n/a | The app processes no data it would need to encrypt |
+
+### V12 Secure Communication
+
+#### V12.1 General TLS Security Guidance
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 12.1.1 | 1 | Verify that only the latest recommended versions of the TLS protocol are enabled, such as TLS 1.2 and TLS 1.3. The latest version of the TLS protocol must be the preferred option. | 🟡 Partly | The listener has `ELBSecurityPolicy-TLS13-1-2-2021-06`; what the emulator negotiates is its own |
+| 12.1.2 | 2 | Verify that only recommended cipher suites are enabled, with the strongest cipher suites set as preferred. L3 applications must only support cipher suites which provide forward secrecy. | 🟡 Partly | As 12.1.1 |
+| 12.1.3 | 2 | Verify that the application validates that mTLS client certificates are trusted before using the certificate identity for authentication or authorization. | ➖ n/a | No client certificates |
+| 12.1.4 | 3 | Verify that proper certification revocation, such as Online Certificate Status Protocol (OCSP) Stapling, is enabled and configured. | ❌ No | Not configured |
+| 12.1.5 | 3 | Verify that Encrypted Client Hello (ECH) is enabled in the application's TLS settings to prevent exposure of sensitive metadata, such as the Server Name Indication (SNI), during TLS handshake processes. | ❌ No | Not configured |
+
+#### V12.2 HTTPS Communication with External Facing Services
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 12.2.1 | 1 | Verify that TLS is used for all connectivity between a client and external facing, HTTP-based services, and does not fall back to insecure or unencrypted communications. | ❌ No | The HTTP listener on 8080 serves the guestbook |
+| 12.2.2 | 1 | Verify that external facing services use publicly trusted TLS certificates. | ❌ No | The certificate is the emulator's own. Only closable on AWS |
+
+#### V12.3 General Service to Service Communication Security
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 12.3.1 | 2 | Verify that an encrypted protocol such as TLS is used for all inbound and outbound connections to and from the application, including monitoring systems, management tools, remote access and SSH, middleware, databases, mainframes, partner systems, or external APIs. The server must not fall back to insecure or unencrypted protocols. | ❌ No | PostgreSQL without TLS; S3 over plain HTTP in the emulator. SSH is encrypted |
+| 12.3.2 | 2 | Verify that TLS clients validate certificates received before communicating with a TLS server. | ❌ No | No TLS client yet, so no certificate is checked |
+| 12.3.3 | 2 | Verify that TLS or another appropriate transport encryption mechanism used for all connectivity between internal, HTTP-based services within the application, and does not fall back to insecure or unencrypted communications. | ❌ No | The load balancer talks to nginx over HTTP |
+| 12.3.4 | 2 | Verify that TLS connections between internal services use trusted certificates. Where internally generated or self-signed certificates are used, the consuming service must be configured to only trust specific internal CAs and specific self-signed certificates. | ❌ No | As 12.3.3 |
+| 12.3.5 | 3 | Verify that services communicating internally within a system (intra-service communications) use strong authentication to ensure that each endpoint is verified. Strong authentication methods, such as TLS client authentication, must be employed to ensure identity, using public-key infrastructure and mechanisms that are resistant to replay attacks. For microservice architectures, consider using a service mesh to simplify certificate management and enhance security. | ❌ No | No mutual authentication between services |
+
+### V13 Configuration
+
+#### V13.1 Configuration Documentation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 13.1.1 | 2 | Verify that all communication needs for the application are documented. This must include external services which the application relies upon and cases where an end user might be able to provide an external location to which the application will then connect. | 🟡 Partly | In the README's diagram and text, not stated as a list |
+| 13.1.2 | 3 | Verify that for each service the application uses, the documentation defines the maximum number of concurrent connections (e.g., connection pool limits) and how the application behaves when that limit is reached, including any fallback or recovery mechanisms, to prevent denial of service conditions. | ❌ No | Not documented |
+| 13.1.3 | 3 | Verify that the application documentation defines resource-management strategies for every external system or service it uses (e.g., databases, file handles, threads, HTTP connections). This should include resource-release procedures, timeout settings, failure handling, and where retry logic is implemented, specifying retry limits, delays, and back-off algorithms. For synchronous HTTP request–response operations it should mandate short timeouts and either disable retries or strictly limit retries to prevent cascading delays and resource exhaustion. | ❌ No | The time limits exist in the code; they are not documented as a strategy |
+| 13.1.4 | 3 | Verify that the application's documentation defines the secrets that are critical for the security of the application and a schedule for rotating them, based on the organization's threat model and business requirements. | ❌ No | Not documented |
+
+#### V13.2 Backend Communication Configuration
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 13.2.1 | 2 | Verify that communications between backend application components that don't support the application's standard user session mechanism, including APIs, middleware, and data layers, are authenticated. Authentication must use individual service accounts, short-term tokens, or certificate-based authentication and not unchanging credentials such as passwords, API keys, or shared accounts with privileged access. | 🟡 Partly | S3 through the instance role, with short-lived credentials. The database with one password that never changes |
+| 13.2.2 | 2 | Verify that communications between backend application components, including local or operating system services, APIs, middleware, and data layers, are performed with accounts assigned the least necessary privileges. | ❌ No | The app logs in as the database's master user, and gunicorn runs as root |
+| 13.2.3 | 2 | Verify that if a credential has to be used for service authentication, the credential being used by the consumer is not a default credential (e.g., root/root or admin/admin). | ❌ No | User `postgres`, password `development-only`, the default in `terraform/variables.tf` |
+| 13.2.4 | 2 | Verify that an allowlist is used to define the external resources or systems with which the application is permitted to communicate (e.g., for outbound requests, data loads, or file access). This allowlist can be implemented at the application layer, web server, firewall, or a combination of different layers. | ❌ No | The security group lets the instance connect anywhere |
+| 13.2.5 | 2 | Verify that the web or application server is configured with an allowlist of resources or systems to which the server can send requests or load data or files from. | ❌ No | As 13.2.4 |
+| 13.2.6 | 3 | Verify that where the application connects to separate services, it follows the documented configuration for each connection, such as maximum parallel connections, behavior when maximum allowed connections is reached, connection timeouts, and retry strategies. | ❌ No | Nothing documented to follow (13.1.2) |
+
+#### V13.3 Secret Management
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 13.3.1 | 2 | Verify that a secrets management solution, such as a key vault, is used to securely create, store, control access to, and destroy backend secrets. These could include passwords, key material, integrations with databases and third-party systems, keys and seeds for time-based tokens, other internal secrets, and API keys. Secrets must not be included in application source code or included in build artifacts. For an L3 application, this must involve a hardware-backed solution such as an HSM. | ❌ No | The database password is in the Terraform state, the inventory and `/etc/guestbook.env`. No AWS key is stored: S3 uses the role |
+| 13.3.2 | 2 | Verify that access to secret assets adheres to the principle of least privilege. | 🟡 Partly | The role may only read, write and delete objects of one bucket; the environment file is readable by root only. The database password opens everything |
+| 13.3.3 | 3 | Verify that all cryptographic operations are performed using an isolated security module (such as a vault or hardware security module) to securely manage and protect key material from exposure outside of the security module. | ➖ n/a | The app holds no key |
+| 13.3.4 | 3 | Verify that secrets are configured to expire and be rotated based on the application's documentation. | ❌ No | The database password never changes |
+
+#### V13.4 Unintended Information Leakage
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 13.4.1 | 1 | Verify that the application is deployed either without any source control metadata, including the .git or .svn folders, or in a way that these folders are inaccessible both externally and to the application itself. | ✅ Yes | The playbook copies the app's files only; no `.git` on the instance |
+| 13.4.2 | 2 | Verify that debug modes are disabled for all components in production environments to prevent exposure of debugging features and information leakage. | ✅ Yes | No debug mode in FastAPI, gunicorn or nginx |
+| 13.4.3 | 2 | Verify that web servers do not expose directory listings to clients unless explicitly intended. | ✅ Yes | No directory listing |
+| 13.4.4 | 2 | Verify that using the HTTP TRACE method is not supported in production environments, to avoid potential information leakage. | ✅ Yes | `TRACE` is answered 405 |
+| 13.4.5 | 2 | Verify that documentation (such as for internal APIs) and monitoring endpoints are not exposed unless explicitly intended. | 🟡 Partly | FastAPI's documentation endpoints are off. `/health` answers anybody, and that is not a written decision |
+| 13.4.6 | 3 | Verify that the application does not expose detailed version information of backend components. | ❌ No | Answers carry `Server: nginx/1.30.2` |
+| 13.4.7 | 3 | Verify that the web tier is configured to only serve files with specific file extensions to prevent unintentional information, configuration, and source code leakage. | ❌ No | nginx passes every path on to the app |
+
+### V14 Data Protection
+
+#### V14.1 Data Protection Documentation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 14.1.1 | 2 | Verify that all sensitive data created and processed by the application has been identified and classified into protection levels. This includes data that is only encoded and therefore easily decoded, such as Base64 strings or the plaintext payload inside a JWT. Protection levels need to take into account any data protection and privacy regulations and standards which the application is required to comply with. | ❌ No | The data is not classified |
+| 14.1.2 | 2 | Verify that all sensitive data protection levels have a documented set of protection requirements. This must include (but not be limited to) requirements related to general encryption, integrity verification, retention, how the data is to be logged, access controls around sensitive data in logs, database-level encryption, privacy and privacy-enhancing technologies to be used, and other confidentiality requirements. | ❌ No | No protection requirements written |
+
+#### V14.2 General Data Protection
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 14.2.1 | 1 | Verify that sensitive data is only sent to the server in the HTTP message body or header fields, and that the URL and query string do not contain sensitive information, such as an API key or session token. | ✅ Yes | Nothing sensitive in a URL: the token travels in a cookie and the form |
+| 14.2.2 | 2 | Verify that the application prevents sensitive data from being cached in server components, such as load balancers and application caches, or ensures that the data is securely purged after use. | ✅ Yes | No server cache |
+| 14.2.3 | 2 | Verify that defined sensitive data is not sent to untrusted parties (e.g., user trackers) to prevent unwanted collection of data outside of the application's control. | ✅ Yes | No third party: no tracker, no CDN |
+| 14.2.4 | 2 | Verify that controls around sensitive data related to encryption, integrity verification, retention, how the data is to be logged, access controls around sensitive data in logs, privacy and privacy-enhancing technologies, are implemented as defined in the documentation for the specific data's protection level. | ❌ No | Nothing documented to implement (14.1.2) |
+| 14.2.5 | 3 | Verify that caching mechanisms are configured to only cache responses which have the expected content type for that resource and do not contain sensitive, dynamic content. The web server should return a 404 or 302 response when a non-existent file is accessed rather than returning a different, valid file. This should prevent Web Cache Deception attacks. | ✅ Yes | Nothing is cached; an unknown path is a 404 |
+| 14.2.6 | 3 | Verify that the application only returns the minimum required sensitive data for the application's functionality. For example, only returning some of the digits of a credit card number and not the full number. If the complete data is required, it should be masked in the user interface unless the user specifically views it. | ✅ Yes | The page shows the name, the text, the picture and the time: all meant to be public |
+| 14.2.7 | 3 | Verify that sensitive information is subject to data retention classification, ensuring that outdated or unnecessary data is deleted automatically, on a defined schedule, or as the situation requires. | ❌ No | Messages and logs are kept for ever |
+| 14.2.8 | 3 | Verify that sensitive information is removed from the metadata of user-submitted files unless storage is consented to by the user. | ❌ No | Pictures keep their metadata, the place they were taken included |
+
+#### V14.3 Client-side Data Protection
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 14.3.1 | 1 | Verify that authenticated data is cleared from client storage, such as the browser DOM, after the client or session is terminated. The 'Clear-Site-Data' HTTP response header field may be able to help with this but the client-side should also be able to clear up if the server connection is not available when the session is terminated. | ➖ n/a | No authenticated data |
+| 14.3.2 | 2 | Verify that the application sets sufficient anti-caching HTTP response header fields (i.e., Cache-Control: no-store) so that sensitive data is not cached in browsers. | ❌ No | The page, which carries the token, has no `Cache-Control: no-store` |
+| 14.3.3 | 2 | Verify that data stored in browser storage (such as localStorage, sessionStorage, IndexedDB, or cookies) does not contain sensitive data, with the exception of session tokens. | ✅ Yes | The only thing stored in the browser is the token cookie |
+
+### V15 Secure Coding and Architecture
+
+#### V15.1 Secure Coding and Architecture Documentation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 15.1.1 | 1 | Verify that application documentation defines risk based remediation time frames for 3rd party component versions with vulnerabilities and for updating libraries in general, to minimize the risk from these components. | ❌ No | No written time frames |
+| 15.1.2 | 2 | Verify that an inventory catalog, such as software bill of materials (SBOM), is maintained of all third-party libraries in use, including verifying that components come from pre-defined, trusted, and continually maintained repositories. | 🟡 Partly | `uv.lock` lists the Python packages with hashes. nginx, the operating system, HTMX and the images are in no inventory |
+| 15.1.3 | 2 | Verify that the application documentation identifies functionality which is time-consuming or resource-demanding. This must include how to prevent a loss of availability due to overusing this functionality and how to avoid a situation where building a response takes longer than the consumer's timeout. Potential defenses may include asynchronous processing, using queues, and limiting parallel processes per user and per application. | ❌ No | Not written |
+| 15.1.4 | 3 | Verify that application documentation highlights third-party libraries which are considered to be "risky components". | ❌ No | Not written |
+| 15.1.5 | 3 | Verify that application documentation highlights parts of the application where "dangerous functionality" is being used. | ❌ No | Not written |
+
+#### V15.2 Security Architecture and Dependencies
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 15.2.1 | 1 | Verify that the application only contains components which have not breached the documented update and remediation time frames. | 🟡 Partly | `pip-audit` in `make qa` finds nothing today; there is no time frame to breach, and nothing watches the rest |
+| 15.2.2 | 2 | Verify that the application has implemented defenses against loss of availability due to functionality which is time-consuming or resource-demanding, based on the documented security decisions and strategies for this. | ✅ Yes | Size limits, the limit on signing, time limits to the database and S3 |
+| 15.2.3 | 2 | Verify that the production environment only includes functionality that is required for the application to function, and does not expose extraneous functionality such as test code, sample snippets, and development functionality. | ✅ Yes | No tests, no development dependency (`uv sync --no-dev`), no sample code on the instance |
+| 15.2.4 | 3 | Verify that third-party components and all of their transitive dependencies are included from the expected repository, whether internally owned or an external source, and that there is no risk of a dependency confusion attack. | ✅ Yes | `uv.lock` pins every package, with its hash, from PyPI only |
+| 15.2.5 | 3 | Verify that the application implements additional protections around parts of the application which are documented as containing "dangerous functionality" or using third-party libraries considered to be "risky components". This could include techniques such as sandboxing, encapsulation, containerization or network level isolation to delay and deter attackers who compromise one part of an application from pivoting elsewhere in the application. | ❌ No | Nothing is documented as dangerous (15.1.5) |
+
+#### V15.3 Defensive Coding
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 15.3.1 | 1 | Verify that the application only returns the required subset of fields from a data object. For example, it should not return an entire data object, as some individual fields should not be accessible to users. | ✅ Yes | The templates name the fields they show |
+| 15.3.2 | 2 | Verify that where the application backend makes calls to external URLs, it is configured to not follow redirects unless it is intended functionality. | ➖ n/a | The app calls no external URL; only S3, through boto3 |
+| 15.3.3 | 2 | Verify that the application has countermeasures to protect against mass assignment attacks by limiting allowed fields per controller and action, e.g., it is not possible to insert or update a field value when it was not intended to be part of that action. | ✅ Yes | The form handler names its fields one by one |
+| 15.3.4 | 2 | Verify that all proxying and middleware components transfer the user's original IP address correctly using trusted data fields that cannot be manipulated by the end user, and the application and web server use this correct value for logging and security decisions such as rate limiting, taking into account that even the original IP address may not be reliable due to dynamic IPs, VPNs, or corporate firewalls. | 🟡 Partly | Right in nginx, where the limit is applied. The app's own log lines do not carry the address |
+| 15.3.5 | 2 | Verify that the application explicitly ensures that variables are of the correct type and performs strict equality and comparator operations. This is to avoid type juggling or type confusion vulnerabilities caused by the application code making an assumption about a variable type. | ✅ Yes | Type hints checked by pyright and pyrefly; FastAPI validates the form |
+| 15.3.6 | 2 | Verify that JavaScript code is written in a way that prevents prototype pollution, for example, by using Set() or Map() instead of object literals. | ➖ n/a | The app has no JavaScript of its own |
+| 15.3.7 | 2 | Verify that the application has defenses against HTTP parameter pollution attacks, particularly if the application framework makes no distinction about the source of request parameters (query string, body parameters, cookies, or header fields). | ✅ Yes | Each value has one declared source: form field, header or cookie |
+
+#### V15.4 Safe Concurrency
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 15.4.1 | 3 | Verify that shared objects in multi-threaded code (such as caches, files, or in-memory objects accessed by multiple threads) are accessed safely by using thread-safe types and synchronization mechanisms like locks or semaphores to avoid race conditions and data corruption. | ❔ Not checked | The app keeps no shared state between requests; not reviewed as such |
+| 15.4.2 | 3 | Verify that checks on a resource's state, such as its existence or permissions, and the actions that depend on them are performed as a single atomic operation to prevent time-of-check to time-of-use (TOCTOU) race conditions. For example, checking if a file exists before opening it, or verifying a user's access before granting it. | ❔ Not checked | Not reviewed |
+| 15.4.3 | 3 | Verify that locks are used consistently to avoid threads getting stuck, whether by waiting on each other or retrying endlessly, and that locking logic stays within the code responsible for managing the resource to ensure locks cannot be inadvertently or maliciously modified by external classes or code. | ➖ n/a | The app takes no lock |
+| 15.4.4 | 3 | Verify that resource allocation policies prevent thread starvation by ensuring fair access to resources, such as by leveraging thread pools, allowing lower-priority threads to proceed within a reasonable timeframe. | ❔ Not checked | Not reviewed |
+
+### V16 Security Logging and Error Handling
+
+#### V16.1 Security Logging Documentation
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 16.1.1 | 2 | Verify that an inventory exists documenting the logging performed at each layer of the application's technology stack, what events are being logged, log formats, where that logging is stored, how it is used, how access to it is controlled, and for how long logs are kept. | ❌ No | No inventory |
+
+#### V16.2 General Logging
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 16.2.1 | 2 | Verify that each log entry includes necessary metadata (such as when, where, who, what) that would allow for a detailed investigation of the timeline when an event happens. | 🟡 Partly | Time, level, method and path. No visitor address and no request identifier in the app's lines |
+| 16.2.2 | 2 | Verify that time sources for all logging components are synchronized, and that timestamps in security event metadata use UTC or include an explicit time zone offset. UTC is recommended to ensure consistency across distributed systems and to prevent confusion during daylight saving time transitions. | ✅ Yes | The app and nginx write the time with its offset from UTC; one host, one clock |
+| 16.2.3 | 2 | Verify that the application only stores or broadcasts logs to the files and services that are documented in the log inventory. | ❌ No | No inventory to compare with (16.1.1) |
+| 16.2.4 | 2 | Verify that logs can be read and correlated by the log processor that is in use, preferably by using a common logging format. | ❌ No | Three formats: the app, gunicorn and nginx |
+| 16.2.5 | 2 | Verify that when logging sensitive data, the application enforces logging based on the data's protection level. For example, it may not be allowed to log certain data, such as credentials or payment details. Other data, such as session tokens, may only be logged by being hashed or masked, either in full or partially. | 🟡 Partly | The app never logs a text, a picture or the token; no protection levels are documented |
+
+#### V16.3 Security Events
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 16.3.1 | 2 | Verify that all authentication operations are logged, including successful and unsuccessful attempts. Additional metadata, such as the type of authentication or factors used, should also be collected. | ➖ n/a | Nobody logs in |
+| 16.3.2 | 2 | Verify that failed authorization attempts are logged. For L3, this must include logging all authorization decisions, including logging when sensitive data is accessed (without logging the sensitive data itself). | ➖ n/a | No access decisions |
+| 16.3.3 | 2 | Verify that the application logs the security events that are defined in the documentation and also logs attempts to bypass the security controls, such as input validation, business logic, and anti-automation. | 🟡 Partly | nginx logs the flood (429). The app does not log a refused post: a broken rule (400) or a wrong token (403) |
+| 16.3.4 | 2 | Verify that the application logs unexpected errors and security control failures such as backend TLS failures. | ✅ Yes | A storage failure is logged with its cause and traceback |
+
+#### V16.4 Log Protection
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 16.4.1 | 2 | Verify that all logging components appropriately encode data to prevent log injection. | ❌ No | The app writes the request's path into a text line as it is |
+| 16.4.2 | 2 | Verify that logs are protected from unauthorized access and cannot be modified. | ❌ No | `/var/log/guestbook.log` is readable by every user of the instance; nothing rotates it |
+| 16.4.3 | 2 | Verify that logs are securely transmitted to a logically separate system for analysis, detection, alerting, and escalation. The aim is to ensure that if the application is breached, the logs are not compromised. | ❌ No | Logs stay on the instance |
+
+#### V16.5 Error Handling
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 16.5.1 | 2 | Verify that a generic message is returned to the consumer when an unexpected or security-sensitive error occurs, ensuring no exposure of sensitive internal system data such as stack traces, queries, secret keys, and tokens. | ✅ Yes | The visitor reads a generic sentence; the cause goes to the log |
+| 16.5.2 | 2 | Verify that the application continues to operate securely when external resource access fails, for example, by using patterns such as circuit breakers or graceful degradation. | ✅ Yes | Time limits; a message without picture is still accepted while S3 is down |
+| 16.5.3 | 2 | Verify that the application fails gracefully and securely, including when an exception occurs, preventing fail-open conditions such as processing a transaction despite errors resulting from validation logic. | ✅ Yes | A failed check refuses the post; nothing is stored on an error |
+| 16.5.4 | 3 | Verify that a "last resort" error handler is defined which will catch all unhandled exceptions. This is both to avoid losing error details that must go to log files and to ensure that an error does not take down the entire application process, leading to a loss of availability. | 🟡 Partly | FastAPI's default handler answers 500 and the worker goes on; it is not stated or tested |
+
+### V17 WebRTC
+
+Does not apply: no WebRTC.
+
+#### V17.1 TURN Server
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 17.1.1 | 2 | Verify that the Traversal Using Relays around NAT (TURN) service only allows access to IP addresses that are not reserved for special purposes (e.g., internal networks, broadcast, loopback). Note that this applies to both IPv4 and IPv6 addresses. | ➖ n/a | No WebRTC |
+| 17.1.2 | 3 | Verify that the Traversal Using Relays around NAT (TURN) service is not susceptible to resource exhaustion when legitimate users attempt to open a large number of ports on the TURN server. | ➖ n/a | No WebRTC |
+
+#### V17.2 Media
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 17.2.1 | 2 | Verify that the key for the Datagram Transport Layer Security (DTLS) certificate is managed and protected based on the documented policy for management of cryptographic keys. | ➖ n/a | No WebRTC |
+| 17.2.2 | 2 | Verify that the media server is configured to use and support approved Datagram Transport Layer Security (DTLS) cipher suites and a secure protection profile for the DTLS Extension for establishing keys for the Secure Real-time Transport Protocol (DTLS-SRTP). | ➖ n/a | No WebRTC |
+| 17.2.3 | 2 | Verify that Secure Real-time Transport Protocol (SRTP) authentication is checked at the media server to prevent Real-time Transport Protocol (RTP) injection attacks from leading to either a Denial of Service condition or audio or video media insertion into media streams. | ➖ n/a | No WebRTC |
+| 17.2.4 | 2 | Verify that the media server is able to continue processing incoming media traffic when encountering malformed Secure Real-time Transport Protocol (SRTP) packets. | ➖ n/a | No WebRTC |
+| 17.2.5 | 3 | Verify that the media server is able to continue processing incoming media traffic during a flood of Secure Real-time Transport Protocol (SRTP) packets from legitimate users. | ➖ n/a | No WebRTC |
+| 17.2.6 | 3 | Verify that the media server is not susceptible to the "ClientHello" Race Condition vulnerability in Datagram Transport Layer Security (DTLS) by checking if the media server is publicly known to be vulnerable or by performing the race condition test. | ➖ n/a | No WebRTC |
+| 17.2.7 | 3 | Verify that any audio or video recording mechanisms associated with the media server are able to continue processing incoming media traffic during a flood of Secure Real-time Transport Protocol (SRTP) packets from legitimate users. | ➖ n/a | No WebRTC |
+| 17.2.8 | 3 | Verify that the Datagram Transport Layer Security (DTLS) certificate is checked against the Session Description Protocol (SDP) fingerprint attribute, terminating the media stream if the check fails, to ensure the authenticity of the media stream. | ➖ n/a | No WebRTC |
+
+#### V17.3 Signaling
+
+| # | Level | Requirement | Complies | Note |
+|---|---|---|---|---|
+| 17.3.1 | 2 | Verify that the signaling server is able to continue processing legitimate incoming signaling messages during a flood attack. This should be achieved by implementing rate limiting at the signaling level. | ➖ n/a | No WebRTC |
+| 17.3.2 | 2 | Verify that the signaling server is able to continue processing legitimate signaling messages when encountering malformed signaling message that could cause a denial of service condition. This could include implementing input validation, safely handling integer overflows, preventing buffer overflows, and employing other robust error-handling techniques. | ➖ n/a | No WebRTC |
+
+## 5. Licence of the requirement texts
+
+The texts in the "Requirement" column are copied from the OWASP Application Security
+Verification Standard 5.0.0, © The OWASP Foundation, released under the
+[Creative Commons Attribution-ShareAlike 4.0 International License](https://creativecommons.org/licenses/by-sa/4.0/).
+The section and chapter titles are the standard's too. Because of the share-alike terms,
+this page is under the same licence, whatever licence the rest of the repository has.

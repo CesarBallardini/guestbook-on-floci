@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guestbook</title>
+  <script src="/static/htmx.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    form { display: grid; gap: .5rem; margin-bottom: 2rem; }
+    input, textarea, button { font: inherit; padding: .4rem; }
+    #messages { list-style: none; padding: 0; }
+    #messages li { border-top: 1px solid #ccc; padding: .6rem 0; }
+    /* A message keeps the line breaks its author typed, and long words still wrap. */
+    #messages .body { white-space: pre-wrap; overflow-wrap: anywhere; }
+    #messages img { display: block; max-width: 100%; max-height: 20rem; margin: .4rem 0; }
+    .meta, footer, label { color: #666; font-size: .85rem; }
+    #form-error { color: #b00020; min-height: 1.2rem; }
+  </style>
+</head>
+<body>
+  <h1>Guestbook</h1>
+
+  <form method="post" action="/messages" enctype="multipart/form-data"
+        hx-post="/messages" hx-encoding="multipart/form-data"
+        hx-target="#messages" hx-swap="outerHTML" hx-disabled-elt="find button"
+        hx-on::before-request="document.getElementById('form-error').textContent = ''"
+        hx-on::after-request="if (event.detail.successful) this.reset(); else document.getElementById('form-error').textContent = event.detail.xhr.responseText || 'The guestbook could not be reached. Please try again.'">
+    <input type="hidden" name="{{ csrf_field_name }}" value="{{ csrf_token }}">
+    <input name="author" placeholder="Your name" aria-label="Your name" required maxlength="{{ max_author_length }}">
+    <textarea name="body" placeholder="Your message" aria-label="Your message" required maxlength="{{ max_body_length }}" rows="3"></textarea>
+    <label>A picture, if you like ({{ accepted_format_names }}, up to {{ max_picture_megabytes }} MB)
+      <input type="file" name="picture" accept="{{ accepted_content_types }}">
+    </label>
+    <button type="submit">Sign the guestbook</button>
+    <div id="form-error" role="alert"></div>
+  </form>
+
+  {% include 'messages.html' %}
+
+  <footer>Served by instance {{ instance_name }}.</footer>
+</body>
+</html>

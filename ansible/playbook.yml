@@ -1,0 +1,238 @@
+# Installs the guestbook on the instance and starts it: nginx on port 80, in front of gunicorn.
+#
+#   docker compose run --rm ansible      # from the folder above, after "terraform apply"
+#
+# The instance is a container without systemd, so nginx and gunicorn are started as daemons and
+# found again by their pid files.
+- name: Install and start the guestbook
+  hosts: all
+  gather_facts: false
+  vars:
+    minimum_python_version: "3.14.5"
+    uv_version: "0.13.7"
+    app_source: "{{ playbook_dir }}/../app"
+    # What is copied besides the guestbook package: what gunicorn and Alembic run, and the two
+    # files that say what the app depends on.
+    app_root_files:
+      - application.py
+      - alembic.ini
+      - pyproject.toml
+      - uv.lock
+    app_dir: /opt/guestbook
+    venv_dir: /opt/guestbook-venv
+    environment_file: /etc/guestbook.env
+    gunicorn_pid_file: /run/guestbook.pid
+    gunicorn_port: 8000
+    # How often one address may sign the guestbook (nginx's limit_req): the average rate, and
+    # how many posts may come at once before the rate applies. A person never gets near; a
+    # script that floods the guestbook is answered 429 until it slows down.
+    signing_rate: 2r/s
+    signing_burst: 20
+
+  tasks:
+    # A new instance reports "running" before its sshd is up, as on EC2.
+    - name: Wait until the instance accepts SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 180
+
+    - name: Install Python 3.14 and nginx
+      ansible.builtin.dnf:
+        name:
+          - python3.14
+          - python3.14-pip
+          - nginx
+        state: present
+
+    - name: Read the operating system's release
+      ansible.builtin.command: cat /etc/system-release
+      register: system_release
+      changed_when: false
+
+    - name: Read the version of Python 3.14
+      ansible.builtin.command: python3.14 -c "import platform; print(platform.python_version())"
+      register: python_version
+      changed_when: false
+
+    - name: Check that Python is at least {{ minimum_python_version }}
+      ansible.builtin.assert:
+        that: python_version.stdout is version(minimum_python_version, '>=')
+        fail_msg: "Python {{ python_version.stdout }} is older than {{ minimum_python_version }}"
+        success_msg: "{{ system_release.stdout }}, Python {{ python_version.stdout }}"
+
+    - name: Create the app's folder
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: "0755"
+
+    # What runs, and the two files that say what it depends on. The tests and the development
+    # tooling stay behind, and so do the __pycache__ folders that running the tests leaves.
+    - name: List the app's folders
+      ansible.builtin.find:
+        paths: "{{ app_source }}/guestbook"
+        recurse: true
+        file_type: directory
+        excludes: __pycache__
+      delegate_to: localhost
+      register: app_folders
+
+    - name: List the app's files
+      ansible.builtin.find:
+        paths: "{{ app_source }}/guestbook"
+        recurse: true
+        excludes: "*.pyc"
+      delegate_to: localhost
+      register: app_files
+
+    - name: Create the app's folders
+      ansible.builtin.file:
+        path: "{{ app_dir }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: "{{ ['guestbook'] + (app_folders.files | map(attribute='path') | map('relpath', app_source) | sort) }}"
+
+    - name: Copy the app
+      ansible.builtin.copy:
+        src: "{{ app_source }}/{{ item }}"
+        dest: "{{ app_dir }}/{{ item }}"
+        mode: "0644"
+      loop: "{{ app_root_files + (app_files.files | map(attribute='path') | map('relpath', app_source) | sort) }}"
+      loop_control:
+        label: "{{ item }}"
+      notify: Stop gunicorn
+
+    # Copying never deletes: a file that left the repository would stay on the instance, where
+    # Python could still import it. So the package on the instance is made to match exactly.
+    - name: List what is in the app's package on the instance
+      ansible.builtin.find:
+        paths: "{{ app_dir }}/guestbook"
+        recurse: true
+        file_type: any
+        excludes:
+          - __pycache__
+          - "*.pyc"
+      register: deployed_entries
+
+    - name: Remove what is no longer in the app
+      ansible.builtin.file:
+        path: "{{ app_dir }}/{{ item }}"
+        state: absent
+      loop: "{{ deployed_paths | difference(app_paths) | sort }}"
+      vars:
+        deployed_paths: "{{ deployed_entries.files | map(attribute='path') | map('relpath', app_dir) }}"
+        app_paths: "{{ (app_folders.files + app_files.files) | map(attribute='path') | map('relpath', app_source) }}"
+      notify: Stop gunicorn
+
+    # A stopped daemon stays in the process table as a zombie: the instance's first process is
+    # not an init and never collects it. So "is it running" asks for a process that isn't one.
+    - name: Install the check for a running daemon
+      ansible.builtin.copy:
+        dest: /usr/local/bin/pid-file-alive
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # pid-file-alive <pid file>: succeeds when the file names a process that still runs.
+          pid="$(cat "$1" 2>/dev/null)" && [ -n "$pid" ] && [ -r "/proc/$pid/status" ] &&
+            ! grep -q '^State:[[:space:]]*Z' "/proc/$pid/status"
+
+    - name: Install uv
+      ansible.builtin.command: python3.14 -m pip install --disable-pip-version-check uv=={{ uv_version }}
+      register: uv_install
+      changed_when: "'Successfully installed' in uv_install.stdout"
+
+    # The versions come from app/uv.lock, which --frozen forbids uv to change.
+    - name: Install the app's dependencies into its virtual environment
+      ansible.builtin.command: uv sync --frozen --no-dev --python /usr/bin/python3.14
+      args:
+        chdir: "{{ app_dir }}"
+      environment:
+        UV_PROJECT_ENVIRONMENT: "{{ venv_dir }}"
+        UV_PYTHON_DOWNLOADS: never
+      register: uv_sync
+      changed_when: "'Installed' in uv_sync.stderr or 'Uninstalled' in uv_sync.stderr"
+      notify: Stop gunicorn
+
+    - name: Write the app's environment
+      ansible.builtin.template:
+        src: guestbook.env.j2
+        dest: "{{ environment_file }}"
+        mode: "0600"
+      notify: Stop gunicorn
+
+    # Alembic runs the migrations the database doesn't have yet, and none when it is up to date.
+    - name: Bring the database's tables up to date
+      ansible.builtin.shell: |
+        set -e
+        set -a; . {{ environment_file }}; set +a
+        {{ venv_dir }}/bin/alembic upgrade head
+      args:
+        chdir: "{{ app_dir }}"
+      register: database_migration
+      changed_when: "'Running upgrade' in database_migration.stderr"
+
+    - name: Configure nginx
+      ansible.builtin.template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/nginx.conf
+        mode: "0644"
+        validate: nginx -t -c %s
+      notify: Reload nginx
+
+    - name: Stop or reload what changed, before the tasks that start it
+      ansible.builtin.meta: flush_handlers
+
+    # --capture-output: what the app logs goes to standard error, which a daemon otherwise
+    # throws away. With it, a storage failure and its cause are in the log file.
+    - name: Start gunicorn unless it is running
+      ansible.builtin.shell: |
+        set -e
+        if pid-file-alive {{ gunicorn_pid_file }}; then exit 0; fi
+        set -a; . {{ environment_file }}; set +a
+        {{ venv_dir }}/bin/gunicorn --daemon --preload --pid {{ gunicorn_pid_file }} \
+          --bind 127.0.0.1:{{ gunicorn_port }} --workers 2 --chdir {{ app_dir }} \
+          --worker-class uvicorn_worker.UvicornWorker \
+          --error-logfile /var/log/guestbook.log --capture-output application:application
+        echo started
+      register: gunicorn_start
+      changed_when: "'started' in gunicorn_start.stdout"
+
+    - name: Start nginx unless it is running
+      ansible.builtin.shell: |
+        if pid-file-alive /run/nginx.pid; then exit 0; fi
+        nginx
+        echo started
+      register: nginx_start
+      changed_when: "'started' in nginx_start.stdout"
+
+    - name: Check that the guestbook answers through nginx
+      ansible.builtin.uri:
+        url: http://127.0.0.1/health
+        status_code: 200
+      register: health
+      until: health.status == 200
+      retries: 10
+      delay: 1
+
+  handlers:
+    - name: Stop gunicorn
+      ansible.builtin.shell: |
+        pid-file-alive {{ gunicorn_pid_file }} || exit 0
+        pid="$(cat {{ gunicorn_pid_file }})"
+        # gunicorn deletes its pid file as it stops: keep the number to watch the process.
+        pid_copy="$(mktemp)"; trap 'rm -f "$pid_copy"' EXIT; echo "$pid" > "$pid_copy"
+        kill "$pid"
+        # Up to 30 seconds: gunicorn lets its workers finish their requests.
+        for attempt in $(seq 150); do
+          pid-file-alive "$pid_copy" || { echo stopped; exit 0; }
+          sleep 0.2
+        done
+        echo "gunicorn (pid $pid) did not stop" >&2
+        exit 1
+      register: gunicorn_stop
+      changed_when: "'stopped' in gunicorn_stop.stdout"
+
+    - name: Reload nginx
+      ansible.builtin.shell: |
+        if pid-file-alive /run/nginx.pid; then nginx -s reload; echo reloaded; fi
+      register: nginx_reload
+      changed_when: "'reloaded' in nginx_reload.stdout"

@@ -1,0 +1,13 @@
+<ul id="messages">
+  {% for message in messages %}
+  <li>
+    <div class="body">{{ message.body }}</div>
+    {% if message.picture_key %}
+    <img src="/pictures/{{ message.picture_key }}" alt="Picture sent by {{ message.author }}">
+    {% endif %}
+    <div class="meta">{{ message.author }}, {{ message.posted_datetime_utc | as_str }}</div>
+  </li>
+  {% else %}
+  <li class="meta">No messages yet.</li>
+  {% endfor %}
+</ul>
