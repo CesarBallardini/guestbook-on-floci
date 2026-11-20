@@ -11,7 +11,7 @@ The tools are split the way they are on a real site:
 | Tool | Does |
 |---|---|
 | **Terraform** | Creates the infrastructure in the emulator: an EC2 instance, a PostgreSQL RDS instance, an S3 bucket, an IAM role for the instance, and a load balancer with HTTP and HTTPS listeners |
-| **Ansible** | Connects to the instance over SSH, installs Python 3.14 and nginx, makes a release from the app's build (with uv) and runs it |
+| **Ansible** | Connects to the instance over SSH, installs Python 3.14, nginx and supervisord, makes a release from the app's build (with uv) and runs it |
 | **The app** | A guestbook, made with FastAPI and HTMX: visitors leave a message, with a picture if they like. Messages go to PostgreSQL, pictures to S3 |
 
 ```mermaid
@@ -254,9 +254,9 @@ make qa                  # lint, both type checkers, architecture, tests with co
 
 | Kind | Where | What it checks | Needs |
 |---|---|---|---|
-| Unit | `tests/unit/` | The rules (by example and by property, with Hypothesis), the use cases, the web adapter (the token against forged posts included), the clock and identifier adapters, the fakes | Nothing |
+| Unit | `tests/unit/` | The rules (by example and by property, with Hypothesis), the use cases, the web adapter (the token against forged posts included), the clock and identifier adapters, the fakes, and that `alembic.ini` finds the migrations by package | Nothing |
 | Acceptance | `tests/acceptance/` | A visitor's scenarios, written in Gherkin | Nothing |
-| Integration | `tests/integration/` | The repository (also under concurrent writers and with the database unreachable), the migrations and the S3 adapter, each test in a database or bucket of its own; and the composition root, `application.py`, which puts the real adapters together | The emulator and the RDS instance |
+| Integration | `tests/integration/` | The repository (also under concurrent writers and with the database unreachable), the migrations and the S3 adapter, each test in a database or bucket of its own; and the composition root, `application.py`, which puts the real adapters together; and the build: the wheel holds every file of the package and nothing else | The emulator and the RDS instance (the build tests need only uv) |
 | End to end | `tests/e2e/` | A real browser through the load balancer: signing with a picture, refusals, uploads over the app's and nginx's limits, no JavaScript, plain HTTP, a network that fails, a flood of posts | Everything deployed |
 
 ### What protects the guestbook
@@ -278,17 +278,18 @@ signing is shared by all of them.
 
 ### The twelve factors
 
-The app meets eleven of the twelve factors of [The Twelve-Factor App](https://12factor.net/).
-The one it does not fully meet comes from the deployment, not from its code: gunicorn runs
-as a daemon with a pid file (VIII).
+The app meets the twelve factors of [The Twelve-Factor App](https://12factor.net/), one of
+them with a note: supervisord, the process manager that runs gunicorn, is itself started by
+the playbook, because the emulated instance has no init (VIII).
 [docs/guestbook.md](docs/guestbook.md#3-the-twelve-factors) states the compliance factor by
 factor, and explains ports and adapters, SOLID and the architecture, with diagrams.
 
 ## 6. Limits
 
-- **The instance is a container, not a virtual machine.** It has no systemd, so Ansible starts
-  nginx and gunicorn as daemons. After the instance's container restarts, nothing runs in it,
-  sshd included: replace it and deploy again.
+- **The instance is a container, not a virtual machine.** It has no systemd, so supervisord
+  is its process manager: it runs nginx and gunicorn and restarts them when they die. But
+  nothing starts supervisord at boot. After the instance's container restarts, nothing runs
+  in it, sshd included: replace it and deploy again.
 
   ```powershell
   cd terraform
@@ -348,7 +349,7 @@ volume Floci leaves behind.
 | `compose.yaml` | Floci and the Ansible control node |
 | `floci/image-catalog.yaml` | Which Docker image stands for the instance's AMI |
 | `terraform/` | The infrastructure. `main.tf` is the place to start reading |
-| `ansible/` | The control node's image, the playbook and its templates |
+| `ansible/` | The control node's image, the playbook, its templates and its files |
 | `app/` | The guestbook, its tests and its tooling |
 | `docs/guestbook.md` | The app explained: ports and adapters, SOLID, the twelve factors, and its architecture in diagrams |
 | `docs/terraform.md` | A mini tutorial on Terraform, with this project as the example |

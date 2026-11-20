@@ -845,7 +845,7 @@ Does not apply: no OAuth, no OIDC.
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
 | 16.4.1 | 2 | Verify that all logging components appropriately encode data to prevent log injection. | ❌ No | The app writes the request's path into a text line as it is |
-| 16.4.2 | 2 | Verify that logs are protected from unauthorized access and cannot be modified. | ❌ No | `/var/log/guestbook.log` is readable by every user of the instance; nothing rotates it |
+| 16.4.2 | 2 | Verify that logs are protected from unauthorized access and cannot be modified. | ❌ No | `/var/log/guestbook.log` is readable by every user of the instance. supervisord rotates it |
 | 16.4.3 | 2 | Verify that logs are securely transmitted to a logically separate system for analysis, detection, alerting, and escalation. The aim is to ensure that if the application is breached, the logs are not compromised. | ❌ No | Logs stay on the instance |
 
 #### V16.5 Error Handling
