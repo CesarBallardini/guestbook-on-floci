@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help all up infra deploy idempotence smoke replace-instance urls status console \
+.PHONY: help all up infra build deploy rollback idempotence smoke replace-instance urls status console \
         install qa lint format test test-integration test-e2e destroy clean
 
 TERRAFORM := terraform -chdir=terraform
@@ -17,8 +17,14 @@ infra: ## Create or update the infrastructure in the emulator (Terraform asks be
 	$(TERRAFORM) init -input=false
 	$(TERRAFORM) apply
 
-deploy: ## Install and start the guestbook on the instance (Ansible, from its container)
+build: ## Build the app: its wheel and its locked dependencies, in app/dist/
+	$(MAKE) -C app build
+
+deploy: build ## Build, then make a release on the instance and run it (Ansible, from its container)
 	docker compose run --rm ansible
+
+rollback: ## Run the release before the current one (the database's migrations are not undone)
+	docker compose run --rm ansible -e rollback=true
 
 idempotence: deploy ## Deploy, then run the playbook again and fail unless that second run changes nothing
 	docker compose run --rm --entrypoint sh ansible /work/ansible/check-idempotence.sh

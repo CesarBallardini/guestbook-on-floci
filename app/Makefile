@@ -1,12 +1,17 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install qa lint format types architecture test test-bdd test-integration test-e2e coverage security clean
+.PHONY: help install build qa lint format types architecture test test-bdd test-integration test-e2e coverage security clean
 
 help: ## Show this list of available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 install: ## Sync the environment from the committed lockfile
 	uv sync --frozen
+
+build: ## Build what a release is made from, in dist/: the app's wheel and its locked dependencies, with hashes
+	rm -rf dist/
+	uv build --wheel --out-dir dist
+	uv export --frozen --no-dev --no-emit-project --format requirements-txt --output-file dist/requirements.txt --quiet
 
 qa: lint types architecture coverage security ## Run the quality gates: lint, types, architecture, tests with coverage, security
 
@@ -45,4 +50,4 @@ security: ## Run the security scans (SAST + known vulnerabilities in the locked 
 	uv run --frozen pip-audit --skip-editable
 
 clean: ## Remove cache and coverage artifacts
-	rm -rf htmlcov/ .coverage .pytest_cache/ .ruff_cache/ .pyrefly_cache/ .hypothesis/
+	rm -rf htmlcov/ .coverage .pytest_cache/ .ruff_cache/ .pyrefly_cache/ .hypothesis/ dist/

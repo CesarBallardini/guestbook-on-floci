@@ -79,7 +79,7 @@ services: easy to deploy, to move between environments and to scale. How the gue
 | II. Dependencies       | Declare and isolate them         | `pyproject.toml`, locked in `uv.lock`, installed into a virtual environment                                                                                            | Yes         |
 | III. Config            | Keep it in the environment       | `DATABASE_URL`, `PICTURE_BUCKET`, `S3_ENDPOINT_URL`, `LOG_LEVEL`. None in the code                                                                                     | Yes         |
 | IV. Backing services   | Treat them as attached resources | PostgreSQL and S3 are addresses in the config; another one is a change of config                                                                                       | Yes         |
-| V. Build, release, run | Separate the three stages        | The playbook copies the source and installs the dependencies on the instance, in place. No built artifact, no numbered release                                         | **No**      |
+| V. Build, release, run | Separate the three stages        | A wheel and the locked dependencies are built on the laptop; a release is that build plus the config, in its own folder on the instance; gunicorn runs the current one | Yes         |
 | VI. Processes          | Stateless, sharing nothing       | Messages in PostgreSQL, pictures in S3, the form's token in the visitor's cookie. Nothing is kept in memory between requests                                           | Yes         |
 | VII. Port binding      | The app serves by binding a port | gunicorn serves HTTP on its own port; nginx only routes to it                                                                                                          | Yes         |
 | VIII. Concurrency      | Scale out with processes         | More gunicorn workers, or more instances. But gunicorn runs as a daemon with a pid file, which the factor asks not to do: the emulated instance has no process manager | **In part** |
@@ -90,23 +90,36 @@ services: easy to deploy, to move between environments and to scale. How the gue
 
 ### Compliance
 
-**The guestbook meets ten of the twelve factors.** Two are not fully met, and both come from
+**The guestbook meets eleven of the twelve factors.** One is not fully met, and it comes from
 how the deployment is done here, not from the app's code:
 
-- **V. Build, release, run: not met.** The playbook copies the source to the instance and
-  installs the dependencies there, in place. Nothing is built once and then released, and no
-  release has a number to go back to. Closing this means building an artifact (a wheel or a
-  container image), numbering each release, and having the playbook install that instead of
-  copying files: a redesign of the deploy.
 - **VIII. Concurrency: met in part.** The app scales out with processes, as the factor asks.
   But gunicorn runs as a daemon and writes a pid file, which the factor asks an app never to
   do: starting and watching processes belongs to the system's process manager. The emulated
   instance is a container without systemd, so it has none, and the playbook does that job.
   On a real instance, a systemd unit would replace the daemon and the pid file.
 
-One change was needed to meet the other ten. For factor XI, `application.py` sets up logging
-itself: every event goes to standard output, from the level `LOG_LEVEL` names (`INFO` when
-not set). Before, the app had no logging of its own and its failures were written nowhere.
+Two changes were needed to meet the other eleven.
+
+For factor V, the deploy has three stages, each with its own command and its own result:
+
+| Stage   | Where        | What it makes                                                                                                                              |
+| ------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Build   | The laptop   | `make build`: the app's wheel and `requirements.txt`, the locked dependencies with their hashes, in `app/dist/`. The same source gives the same bytes |
+| Release | The instance | The playbook: the build installed in a virtual environment, with the config next to it, in `/opt/guestbook/releases/<UTC time>`. Nothing in it changes afterwards |
+| Run     | The instance | gunicorn, started through the link `/opt/guestbook/current`, which points at one release                                                   |
+
+A release is named by the moment it was made, such as `20261119T231500Z`. The same build with
+the same config is the same release, so deploying twice makes one. A new build or a new
+config makes a new release, and `make rollback` points `current` back at the one before. Two
+limits remain: the dependencies are downloaded on the instance when a release is made (the
+hashes in `requirements.txt` refuse anything that differs from the lock), and a rollback does
+not undo the database's migrations. Before, the playbook copied the source to the instance
+and installed the dependencies there, in place.
+
+For factor XI, `application.py` sets up logging itself: every event goes to standard output,
+from the level `LOG_LEVEL` names (`INFO` when not set). Before, the app had no logging of its
+own and its failures were written nowhere.
 
 ## 4. Architecture
 
