@@ -234,22 +234,10 @@
               ansible.builtin.fail:
                 msg: "The release could not be made. The current one, '{{ current_release_id }}', still runs."
 
-        # Before the switch: the release that is about to run finds its tables. Alembic runs the
-        # migrations the database doesn't have yet, and none when it is up to date.
-        - name: Bring the database's tables up to date
-          ansible.builtin.shell: |
-            set -e
-            release={{ releases_dir }}/{{ target_release_id }}
-            set -a; . "$release/guestbook.env"; set +a
-            alembic_ini="$("$release/venv/bin/python" -c \
-              'import guestbook, pathlib; print(pathlib.Path(guestbook.__file__).parent / "alembic.ini")')"
-            "$release/venv/bin/alembic" --config "$alembic_ini" upgrade head
-          register: database_migration
-          changed_when: "'Running upgrade' in database_migration.stderr"
-
     # ---- Rollback: the release before the current one ---------------------------------------
 
-    # The database's migrations are not undone: an older release meets the newer tables.
+    # The database's migrations are not undone: the older release runs on the newer schema,
+    # which every migration must allow (expand and contract, docs/guestbook.md).
     - name: Choose the release before the current one
       when: rollback | bool
       block:
@@ -262,6 +250,44 @@
         - name: Note the release to run
           ansible.builtin.set_fact:
             target_release_id: "{{ release_ids | select('lt', current_release_id) | last }}"
+
+    # ---- The database's schema, as the release to run sees it --------------------------------
+
+    # "up-to-date", "behind" (its migrations have not run) or "ahead" (a newer release migrated
+    # the database: after a rollback). See schema_version.py.
+    - name: Read the state of the database's schema, as the release to run sees it
+      ansible.builtin.shell: |
+        set -e
+        release={{ releases_dir }}/{{ target_release_id }}
+        set -a; . "$release/guestbook.env"; set +a
+        "$release/venv/bin/python" -m guestbook.infrastructure.database.schema_version
+      register: schema_state
+      changed_when: false
+
+    # The release would refuse to start on it.
+    - name: Check that the release to go back to fits the database's schema
+      ansible.builtin.assert:
+        that: schema_state.stdout != 'behind'
+        fail_msg: >-
+          The database's schema is behind release '{{ target_release_id }}': its migrations have
+          not run. Deploy instead. '{{ current_release_id }}' still runs.
+        quiet: true
+      when: rollback | bool
+
+    # Before the switch: the release that is about to run finds its tables. Only a schema
+    # behind the release is migrated. One ahead of it is left alone: the release's own
+    # migrations do not know its revision, and "upgrade head" would fail.
+    - name: Bring the database's tables up to date
+      ansible.builtin.shell: |
+        set -e
+        release={{ releases_dir }}/{{ target_release_id }}
+        set -a; . "$release/guestbook.env"; set +a
+        alembic_ini="$("$release/venv/bin/python" -c \
+          'import guestbook, pathlib; print(pathlib.Path(guestbook.__file__).parent / "alembic.ini")')"
+        "$release/venv/bin/alembic" --config "$alembic_ini" upgrade head
+      register: database_migration
+      changed_when: "'Running upgrade' in database_migration.stderr"
+      when: not (rollback | bool) and schema_state.stdout == 'behind'
 
     # ---- Run --------------------------------------------------------------------------------
 
@@ -349,7 +375,10 @@
 
     - name: Say which release runs
       ansible.builtin.debug:
-        msg: "Release {{ target_release_id }} runs."
+        msg: >-
+          Release {{ target_release_id }} runs.
+          {{ "The database's schema is ahead of it: a newer release migrated it."
+             if schema_state.stdout == 'ahead' else "The database's schema is up to date." }}
 
   # Each one does nothing while supervisord is not running yet: the task that starts it then
   # starts everything from what is on the instance by then.

@@ -107,7 +107,8 @@ The commands are the same in PowerShell and in Git Bash.
 
    The run ends with `failed=0`. Among its lines it prints the instance's release, for example
    `Amazon Linux release 2023.12.20260611 (Amazon Linux), Python 3.14.5`, and its last line
-   names the release that runs, for example `Release 20261119T231500Z runs.`
+   names the release that runs and the state of the database's schema, for example
+   `Release 20261119T231500Z runs. The database's schema is up to date.`
 
 6. **Open the guestbook** at one of the URLs below.
 
@@ -123,6 +124,12 @@ that runs. The instance keeps the last five. To run the release before the curre
 docker compose run --rm ansible -e rollback=true
 ```
 
+A rollback leaves the database's schema as it is: it runs no migration, and undoes none.
+The older release runs on the newer schema, and the playbook ends with
+`The database's schema is ahead of it`. That works because every migration must suit the
+releases before it (expand and contract, `docs/guestbook.md`). `make rollback-check`
+proves it on the running stack.
+
 ### The same, with Make
 
 With Make installed (`choco install make`), the root `Makefile` wraps the usual commands.
@@ -133,6 +140,7 @@ With Make installed (`choco install make`), the root `Makefile` wraps the usual 
 | `make all` | Steps 2 to 5, then prints the URLs |
 | `make up`, `make infra`, `make build`, `make deploy` | Step 2, step 3, step 4, steps 4 and 5 |
 | `make rollback` | Runs the release before the current one |
+| `make rollback-check` | Deploys, then a build with one more migration, rolls back across it and checks that the older release answers; restores the database and the release afterwards |
 | `make urls`, `make status`, `make console` | The URLs, the running containers, the web console's URL |
 | `make smoke` | Checks the running stack: the guestbook answers on both URLs and Terraform has nothing to change |
 | `make idempotence` | Deploys, then runs the playbook again and fails unless that second run reports `changed=0` |
@@ -224,8 +232,10 @@ How the pieces keep apart:
   imperatively, in `guestbook/infrastructure/database/orm_mapping.py`, so there is no second
   class for a row and the domain imports nothing from SQLAlchemy.
 - **The tables** are made by Alembic migrations, in
-  `guestbook/infrastructure/database/migrations/`. The playbook runs `alembic upgrade head`
-  on each deploy, before it starts the app.
+  `guestbook/infrastructure/database/migrations/`. On each deploy the playbook reads the
+  schema's state as the new release sees it (`schema_version.py`: up to date, behind or
+  ahead), and runs `alembic upgrade head` when it is behind, before it starts the app. A
+  worker that starts on a schema behind its release refuses to start.
 - **Time and identifiers** come through ports too (`ClockPort`, `UuidGeneratorPort`), so the
   tests hand over a fixed clock and counting identifiers instead of patching anything. The
   real identifiers are version 7 UUIDs.
@@ -258,7 +268,7 @@ make qa                  # lint, both type checkers, architecture, tests with co
 |---|---|---|---|
 | Unit | `tests/unit/` | The rules (by example and by property, with Hypothesis), the use cases, the web adapter (the token against forged posts included), the clock and identifier adapters, the fakes, and that `alembic.ini` finds the migrations by package | Nothing |
 | Acceptance | `tests/acceptance/` | A visitor's scenarios, written in Gherkin | Nothing |
-| Integration | `tests/integration/` | The repository (also under concurrent writers and with the database unreachable), the migrations and the S3 adapter, each test in a database or bucket of its own; and the composition root, `application.py`, which puts the real adapters together; and the build: the wheel holds every file of the package and nothing else | The emulator and the RDS instance (the build tests need only uv) |
+| Integration | `tests/integration/` | The repository (also under concurrent writers and with the database unreachable), the migrations, the schema's state (up to date, behind, ahead) and the S3 adapter, each test in a database or bucket of its own; and the composition root, `application.py`, which puts the real adapters together; and the build: the wheel holds every file of the package and nothing else | The emulator and the RDS instance (the build tests need only uv) |
 | End to end | `tests/e2e/` | A real browser through the load balancer: signing with a picture, refusals, uploads over the app's and nginx's limits, no JavaScript, the redirect from plain HTTP and the HTTPS-only rule, a network that fails, a flood of posts | Everything deployed |
 
 ### What protects the guestbook
@@ -304,7 +314,9 @@ factor, and explains ports and adapters, SOLID and the architecture, with diagra
   The messages and pictures survive: they live in RDS and S3, not on the instance.
 - **Releases live on the instance.** A replaced instance starts with none, so there is
   nothing to roll back to until the second deploy. A rollback does not undo the database's
-  migrations: the older release meets the newer tables.
+  migrations: the older release runs on the newer schema. It can only because each migration
+  suits the releases before it, a rule `make rollback-check` tests once and code review
+  keeps.
 - **Floci keeps its state in memory.** Restarting its container, Docker Desktop or the laptop
   loses every emulated resource. Then destroy what is left and start again from step 2.
 - **One setting is the emulator's, not AWS's.** The HTTP listener's redirect uses the path

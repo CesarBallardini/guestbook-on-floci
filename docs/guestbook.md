@@ -119,11 +119,40 @@ For factor V, the deploy has three stages, each with its own command and its own
 
 A release is named by the moment it was made, such as `20261119T231500Z`. The same build with
 the same config is the same release, so deploying twice makes one. A new build or a new
-config makes a new release, and `make rollback` points `current` back at the one before. Two
-limits remain: the dependencies are downloaded on the instance when a release is made (the
-hashes in `requirements.txt` refuse anything that differs from the lock), and a rollback does
-not undo the database's migrations. Before, the playbook copied the source to the instance
-and installed the dependencies there, in place.
+config makes a new release, and `make rollback` points `current` back at the one before. One
+limit remains: the dependencies are downloaded on the instance when a release is made (the
+hashes in `requirements.txt` refuse anything that differs from the lock). Before, the
+playbook copied the source to the instance and installed the dependencies there, in place.
+
+A rollback moves the code back and leaves the database's schema where it is. The schema is
+never rolled back: a `downgrade()` that drops a column drops what it held, and it would run
+under pressure, untested. So a release must run on the schema of any later release, and every
+migration follows **expand and contract**:
+
+- One release may add: a table, a nullable column or one with a default, an index, a
+  constraint the older code's rules already respect (as `0002` does).
+- What removes or renames is split across releases: add the new column and write to both,
+  then read from the new one, and drop the old one only when no release kept on the instance
+  (the last five) still reads it.
+- Every migration keeps its `downgrade()`, for development and the tests. A deploy or a
+  rollback never runs it. On AWS, a disaster is answered with an RDS snapshot or a
+  point-in-time recovery.
+
+`guestbook/infrastructure/database/schema_version.py` compares the database's revision with
+the release's latest migration, in one of three states:
+
+| State        | Means                                                             | When a worker starts           | The playbook                                                    |
+| ------------ | ----------------------------------------------------------------- | ------------------------------ | --------------------------------------------------------------- |
+| `up-to-date` | The database is at the release's latest migration                 | Starts                         | Runs no migration                                               |
+| `behind`     | The release's migrations have not all run                         | Refuses to start, and logs why | Runs `alembic upgrade head`; refuses a rollback to that release |
+| `ahead`      | A revision the release does not know: a newer release migrated it | Starts, and logs a warning     | Runs no migration, and says so                                  |
+
+A database that cannot be reached does not stop a worker from starting: the app answers each
+request that needs it with a page that says so. Refusing would keep the app down after the
+database is back, since supervisord gives up on a program that keeps failing. `ahead` cannot
+be told apart from a revision of another branch; with one line of migrations (a unit test
+holds that) it means a rollback. `make rollback-check` deploys a build with one more
+migration, rolls back across it and checks that the older release answers.
 
 A release is made from the wheel alone, so a file missing from the wheel is missing on the
 instance. Two tests guard that: `tests/integration/test_build.py` builds a wheel and fails

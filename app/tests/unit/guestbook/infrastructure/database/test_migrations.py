@@ -12,6 +12,7 @@ from alembic.script import ScriptDirectory
 
 import guestbook
 import guestbook.infrastructure.database
+from guestbook.infrastructure.database.schema_version import MIGRATIONS_LOCATION, PATH_SEPARATOR, migrations_directory
 
 pytestmark = pytest.mark.unit
 
@@ -47,3 +48,9 @@ def test_the_migrations_end_in_one_head(alembic_config: Config) -> None:
     script_directory = ScriptDirectory.from_config(alembic_config)
 
     assert len(script_directory.get_heads()) == 1
+
+
+def test_the_schema_check_finds_the_migrations_where_alembic_ini_says(alembic_config: Config) -> None:
+    assert alembic_config.get_main_option('script_location') == MIGRATIONS_LOCATION
+    assert alembic_config.get_main_option('path_separator') == PATH_SEPARATOR
+    assert Path(migrations_directory().dir).resolve() == MIGRATIONS_DIR.resolve()
