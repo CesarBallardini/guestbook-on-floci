@@ -147,42 +147,88 @@ Each use case is one input port in `domain/input_ports.py` and one class in `use
 
 ### 4.2 Class diagrams
 
-#### The layers
+#### The layers: the adapters
 
-Who knows whom. Every arrow ends in the domain.
+Who knows whom. The adapters know the domain's ports and nothing of the use cases: the web
+calls the input ports, the others implement the output ports.
 
 ```mermaid
-flowchart TB
-    root["application.py<br/>composition root"]
+classDiagram
+    direction LR
+    class CompositionRoot["application.py"] {
+        composition root
+    }
+    namespace infrastructure {
+        class Web {
+            FastAPI, HTMX
+        }
+        class Database {
+            SQLAlchemy, Alembic
+        }
+        class S3PictureStorage
+        class SystemClock
+        class Uuid7Generator
+    }
+    namespace domain {
+        class InputPorts {
+            <<interface>>
+        }
+        class OutputPorts {
+            <<interface>>
+        }
+    }
 
-    subgraph infrastructure["infrastructure: adapters"]
-        web["web<br/>FastAPI, HTMX"]
-        database["database<br/>SQLAlchemy, Alembic"]
-        s3["S3 picture storage"]
-        clock["system clock"]
-        uuid["UUID v7 generator"]
-    end
+    CompositionRoot ..> Web
+    CompositionRoot ..> Database
+    CompositionRoot ..> S3PictureStorage
+    CompositionRoot ..> SystemClock
+    CompositionRoot ..> Uuid7Generator
+    Web ..> InputPorts : calls
+    Database ..|> OutputPorts : implements
+    S3PictureStorage ..|> OutputPorts : implements
+    SystemClock ..|> OutputPorts : implements
+    Uuid7Generator ..|> OutputPorts : implements
+```
 
-    subgraph usecases["use_cases"]
-        cases["SignGuestbookUseCase<br/>ListLatestMessagesUseCase<br/>GetPictureUseCase"]
-    end
+#### The layers: the use cases
 
-    subgraph domain["domain"]
-        inputs["input ports"]
-        outputs["output ports"]
-        rules["rules: message, picture"]
-    end
+The use cases know the domain only: they implement the input ports, call the output ports
+and apply the rules.
 
-    root --> infrastructure
-    root --> usecases
-    web -- calls --> inputs
-    cases -- implement --> inputs
-    cases -- call --> outputs
-    cases --> rules
-    database -- implements --> outputs
-    s3 -- implements --> outputs
-    clock -- implements --> outputs
-    uuid -- implements --> outputs
+```mermaid
+classDiagram
+    direction LR
+    class CompositionRoot["application.py"] {
+        composition root
+    }
+    namespace use_cases {
+        class SignGuestbookUseCase
+        class ListLatestMessagesUseCase
+        class GetPictureUseCase
+    }
+    namespace domain {
+        class InputPorts {
+            <<interface>>
+        }
+        class OutputPorts {
+            <<interface>>
+        }
+        class Rules {
+            message, picture
+        }
+    }
+
+    CompositionRoot ..> SignGuestbookUseCase
+    CompositionRoot ..> ListLatestMessagesUseCase
+    CompositionRoot ..> GetPictureUseCase
+    SignGuestbookUseCase ..|> InputPorts : implements
+    ListLatestMessagesUseCase ..|> InputPorts : implements
+    GetPictureUseCase ..|> InputPorts : implements
+    SignGuestbookUseCase ..> OutputPorts : calls
+    ListLatestMessagesUseCase ..> OutputPorts : calls
+    GetPictureUseCase ..> OutputPorts : calls
+    SignGuestbookUseCase ..> Rules : applies
+    GetPictureUseCase ..> Rules : applies
 ```
 
 #### The domain's rules
@@ -230,7 +276,7 @@ classDiagram
 it or raises `InvalidMessageError`. `Message` is a posted one. `StorageError` is what every
 adapter turns its own failures into.
 
-#### Input ports: the web calls them, the use cases implement them
+#### Input ports: the web calls them
 
 ```mermaid
 classDiagram
@@ -251,9 +297,6 @@ classDiagram
         +str body
         +bytes picture_content
     }
-    class SignGuestbookUseCase
-    class ListLatestMessagesUseCase
-    class GetPictureUseCase
     class FastApiApp {
         GET /
         POST /messages
@@ -261,19 +304,127 @@ classDiagram
         GET /health
     }
 
-    SignGuestbookUseCase ..|> SignGuestbookPort
-    ListLatestMessagesUseCase ..|> ListLatestMessagesPort
-    GetPictureUseCase ..|> GetPicturePort
-    FastApiApp ..> SignGuestbookPort : calls
-    FastApiApp ..> ListLatestMessagesPort : calls
-    FastApiApp ..> GetPicturePort : calls
+    SignGuestbookPort <.. FastApiApp : calls
+    ListLatestMessagesPort <.. FastApiApp : calls
+    GetPicturePort <.. FastApiApp : calls
     SignGuestbookPort ..> SignGuestbookRequestDto
 ```
 
-#### Output ports: the use cases call them, the adapters implement them
+#### Input ports: the use cases implement them
+
+Signing:
 
 ```mermaid
 classDiagram
+    class SignGuestbookPort {
+        <<interface>>
+        +sign_guestbook(request_dto)
+    }
+    class SignGuestbookUseCase
+
+    SignGuestbookPort <|.. SignGuestbookUseCase
+```
+
+Reading the latest messages:
+
+```mermaid
+classDiagram
+    class ListLatestMessagesPort {
+        <<interface>>
+        +list_latest_messages() list~Message~
+    }
+    class ListLatestMessagesUseCase
+
+    ListLatestMessagesPort <|.. ListLatestMessagesUseCase
+```
+
+Looking at a picture:
+
+```mermaid
+classDiagram
+    class GetPicturePort {
+        <<interface>>
+        +get_picture(picture_key) Picture
+    }
+    class GetPictureUseCase
+
+    GetPicturePort <|.. GetPictureUseCase
+```
+
+#### Output ports: the adapters implement them
+
+The messages:
+
+```mermaid
+classDiagram
+    class MessageWriterPort {
+        <<interface>>
+        +add(message)
+    }
+    class MessageReaderPort {
+        <<interface>>
+        +latest(limit) list~Message~
+    }
+    class SqlAlchemyMessageRepository
+
+    MessageWriterPort <|.. SqlAlchemyMessageRepository
+    MessageReaderPort <|.. SqlAlchemyMessageRepository
+```
+
+The pictures:
+
+```mermaid
+classDiagram
+    class PictureWriterPort {
+        <<interface>>
+        +save(picture_key, picture)
+        +delete(picture_key)
+    }
+    class PictureReaderPort {
+        <<interface>>
+        +load(picture_key) Picture
+    }
+    class S3PictureStorageAdapter
+
+    PictureWriterPort <|.. S3PictureStorageAdapter
+    PictureReaderPort <|.. S3PictureStorageAdapter
+```
+
+The clock:
+
+```mermaid
+classDiagram
+    class ClockPort {
+        <<interface>>
+        +now_datetime_utc() datetime
+    }
+    class SystemClockAdapter
+
+    ClockPort <|.. SystemClockAdapter
+```
+
+The identifiers:
+
+```mermaid
+classDiagram
+    class UuidGeneratorPort {
+        <<interface>>
+        +new_uuid() UUID
+    }
+    class Uuid7GeneratorAdapter
+
+    UuidGeneratorPort <|.. Uuid7GeneratorAdapter
+```
+
+In the tests, `tests/fakes.py` holds a second implementation of each output port, kept in
+memory: `InMemoryMessageRepository`, `InMemoryPictureStorageAdapter`, `FixedClockAdapter`
+and `SequenceUuidGeneratorAdapter`.
+
+#### Output ports: the use cases call them
+
+```mermaid
+classDiagram
+    direction LR
     class MessageWriterPort {
         <<interface>>
         +add(message)
@@ -304,29 +455,15 @@ classDiagram
     class ListLatestMessagesUseCase
     class GetPictureUseCase
 
-    class SqlAlchemyMessageRepository
-    class S3PictureStorageAdapter
-    class SystemClockAdapter
-    class Uuid7GeneratorAdapter
-
     SignGuestbookUseCase ..> MessageWriterPort
     SignGuestbookUseCase ..> PictureWriterPort
     SignGuestbookUseCase ..> ClockPort
     SignGuestbookUseCase ..> UuidGeneratorPort
     ListLatestMessagesUseCase ..> MessageReaderPort
     GetPictureUseCase ..> PictureReaderPort
-
-    SqlAlchemyMessageRepository ..|> MessageWriterPort
-    SqlAlchemyMessageRepository ..|> MessageReaderPort
-    S3PictureStorageAdapter ..|> PictureWriterPort
-    S3PictureStorageAdapter ..|> PictureReaderPort
-    SystemClockAdapter ..|> ClockPort
-    Uuid7GeneratorAdapter ..|> UuidGeneratorPort
 ```
 
-In the tests, `tests/fakes.py` holds a second implementation of each output port, kept in
-memory: `InMemoryMessageRepository`, `InMemoryPictureStorageAdapter`, `FixedClockAdapter`
-and `SequenceUuidGeneratorAdapter`.
+Each use case asks for the ports it needs and no more: only `SignGuestbookUseCase` writes.
 
 ### 4.3 Sequence diagrams
 
