@@ -135,3 +135,12 @@ awsl acm list-certificates
 terraform state list        # in terraform/: every resource Terraform created
 docker ps                   # the containers behind them: the emulator, the instance, the database, the console
 ```
+
+What runs on the instance, and what the app wrote. The instance's container is named
+`floci-aws-ec2-<instance id>`; `terraform output instance` prints the id.
+
+```powershell
+docker exec floci-aws-ec2-<instance id> supervisorctl status                 # gunicorn and nginx, under supervisord
+docker exec floci-aws-ec2-<instance id> tail /var/log/guestbook.log          # the app's output
+docker exec floci-aws-ec2-<instance id> readlink /opt/guestbook/current      # the release that runs
+```

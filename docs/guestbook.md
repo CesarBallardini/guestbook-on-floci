@@ -115,7 +115,7 @@ For factor V, the deploy has three stages, each with its own command and its own
 | ------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Build   | The laptop   | `make build`: the app's wheel and `requirements.txt`, the locked dependencies with their hashes, in `app/dist/`. The same source gives the same bytes |
 | Release | The instance | The playbook: the build installed in a virtual environment, with the config next to it, in `/opt/guestbook/releases/<UTC time>`. Nothing in it changes afterwards |
-| Run     | The instance | gunicorn, started through the link `/opt/guestbook/current`, which points at one release                                                   |
+| Run     | The instance | supervisord runs gunicorn through the link `/opt/guestbook/current`, which points at one release                                           |
 
 A release is named by the moment it was made, such as `20261119T231500Z`. The same build with
 the same config is the same release, so deploying twice makes one. A new build or a new
