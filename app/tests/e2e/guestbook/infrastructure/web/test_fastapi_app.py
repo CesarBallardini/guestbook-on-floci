@@ -129,15 +129,36 @@ def test_signing_works_in_a_browser_without_javascript(browser: Browser) -> None
         context.close()
 
 
-def test_the_guestbook_works_over_plain_http_too(page: Page) -> None:
-    body = a_text_of_this_run('Over plain HTTP')
+def test_plain_http_only_sends_the_browser_to_https() -> None:
+    with httpx.Client(follow_redirects=False) as client:
+        answer = client.get(f'{GUESTBOOK_HTTP_URL}pictures/some-key?size=large')
+
+    assert answer.status_code == HTTPStatus.MOVED_PERMANENTLY
+    assert answer.headers['Location'] == f'{GUESTBOOK_URL}pictures/some-key?size=large'
+    # Nothing of the guestbook is served over plain HTTP.
+    assert answer.content == b''
+
+
+def test_a_visitor_who_types_the_http_address_signs_over_https(page: Page) -> None:
+    body = a_text_of_this_run('Came in over plain HTTP')
 
     page.goto(GUESTBOOK_HTTP_URL)
+    expect(page).to_have_url(GUESTBOOK_URL)
     page.get_by_placeholder('Your name').fill('Playwright')
     page.get_by_placeholder('Your message').fill(body)
     page.get_by_role('button', name='Sign the guestbook').click()
 
     expect(page.locator('#messages li .body').first).to_have_text(body)
+
+
+def test_the_browser_is_told_to_use_https_only_and_keep_the_token_there() -> None:
+    with httpx.Client(verify=False) as client:  # the emulator's own issuer
+        answer = client.get(GUESTBOOK_URL)
+
+    assert answer.headers['Strict-Transport-Security'] == 'max-age=31536000; includeSubDomains'
+    cookie = answer.headers['Set-Cookie']
+    assert cookie.startswith('__Host-')
+    assert 'secure' in cookie.lower()
 
 
 def test_a_guestbook_that_cannot_be_reached_says_so_and_keeps_what_was_written(page: Page) -> None:
@@ -211,7 +232,7 @@ def test_a_flood_of_posts_is_slowed_down_while_reading_goes_on() -> None:
     def post_a_message(_number: int) -> httpx.Response:
         return client.post('messages', data={'author': 'Flood', 'body': 'Again and again'})
 
-    with httpx.Client(base_url=GUESTBOOK_HTTP_URL) as client:
+    with httpx.Client(base_url=GUESTBOOK_URL, verify=False) as client:  # the emulator's own issuer
         with ThreadPoolExecutor(max_workers=20) as executor:
             answers = list(executor.map(post_a_message, range(FLOOD_POSTS)))
         reading = client.get('')
@@ -223,6 +244,8 @@ def test_a_flood_of_posts_is_slowed_down_while_reading_goes_on() -> None:
     assert got_through
     assert len(slowed_down) > FLOOD_POSTS // 2
     assert slowed_down[0].text == 'Too many messages in a short time. Please wait a moment and try again.\n'
+    # nginx's own answer, which never reached the app, carries the HTTPS-only rule too.
+    assert 'max-age=31536000' in slowed_down[0].headers['Strict-Transport-Security']
     assert reading.status_code == HTTPStatus.OK
 
     time.sleep(SECONDS_UNTIL_THE_FLOOD_IS_FORGOTTEN)

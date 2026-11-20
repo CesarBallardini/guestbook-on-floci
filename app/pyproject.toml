@@ -45,7 +45,7 @@ dev = [
     "bandit[toml]",
     "pip-audit",
     "import-linter==2.15",
-    "grimp==3.18",  # import-linter's engine, pinned with it
+    "grimp==3.18",          # import-linter's engine, pinned with it
 ]
 
 [tool.pytest.ini_options]
@@ -88,10 +88,7 @@ name = "Dependencies point inwards: adapters and use cases > domain"
 type = "layers"
 # A layer imports only the layers below it. "|" puts two on one level and forbids imports
 # between them: the adapters never import the use cases, nor the use cases the adapters.
-layers = [
-    "infrastructure | use_cases",
-    "domain",
-]
+layers = ["infrastructure | use_cases", "domain"]
 containers = ["guestbook"]
 # A new package directly under guestbook/ fails the check until it is given a layer here.
 exhaustive = true
@@ -102,7 +99,16 @@ name = "The domain and the use cases know no framework, database or cloud librar
 type = "forbidden"
 source_modules = ["guestbook.domain", "guestbook.use_cases"]
 forbidden_modules = [
-    "fastapi", "starlette", "jinja2", "sqlalchemy", "alembic", "psycopg", "boto3", "botocore", "uvicorn", "gunicorn",
+    "fastapi",
+    "starlette",
+    "jinja2",
+    "sqlalchemy",
+    "alembic",
+    "psycopg",
+    "boto3",
+    "botocore",
+    "uvicorn",
+    "gunicorn",
 ]
 
 [[tool.importlinter.contracts]]

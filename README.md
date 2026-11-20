@@ -21,7 +21,7 @@ flowchart LR
     subgraph laptop["Docker network guestbook-on-floci, on the laptop"]
         subgraph floci["Floci, the AWS emulator"]
             api["AWS API<br/>:4566"]
-            lb["Load balancer<br/>:8080 HTTP, :8443 HTTPS"]
+            lb["Load balancer<br/>:8443 HTTPS<br/>:8080 redirects to it"]
             s3[("S3 bucket")]
         end
         subgraph instance["EC2 instance, a container Floci starts"]
@@ -146,7 +146,7 @@ With Make installed (`choco install make`), the root `Makefile` wraps the usual 
 | What | URL | Notes |
 |---|---|---|
 | The guestbook, HTTPS | <https://localhost:8443/> | The browser warns once: see below |
-| The guestbook, HTTP | <http://localhost:8080/> | No warning |
+| The guestbook, HTTP | <http://localhost:8080/> | Serves nothing: it sends the browser to the HTTPS address |
 | Floci's web console | <http://127.0.0.1:4566/_floci/ui> | Shows the emulated resources. The first visit starts it and moves to <http://127.0.0.1:4500/> |
 | Floci, the AWS API | `http://127.0.0.1:4566` | For Terraform and the AWS CLI, with any text as keys |
 | PostgreSQL | `127.0.0.1`, port 7001, user `postgres`, database `guestbook` | Password: the Terraform variable `database_password` |
@@ -158,7 +158,9 @@ the load balancer, in the console and with the AWS CLI.
 **About the certificate.** The emulator's Certificate Manager issues the HTTPS certificate, at
 no cost, as ACM does on AWS. Its issuer is the emulator itself, which no browser knows, so the
 browser shows a warning; choose "Advanced" and continue. The connection is encrypted all the
-same.
+same. The answers carry an HSTS header, but a browser ignores it over a connection whose
+certificate it does not trust, as here: it takes effect on AWS, with a certificate from a
+known issuer.
 
 ## 5. The app and its tests
 
@@ -257,7 +259,7 @@ make qa                  # lint, both type checkers, architecture, tests with co
 | Unit | `tests/unit/` | The rules (by example and by property, with Hypothesis), the use cases, the web adapter (the token against forged posts included), the clock and identifier adapters, the fakes, and that `alembic.ini` finds the migrations by package | Nothing |
 | Acceptance | `tests/acceptance/` | A visitor's scenarios, written in Gherkin | Nothing |
 | Integration | `tests/integration/` | The repository (also under concurrent writers and with the database unreachable), the migrations and the S3 adapter, each test in a database or bucket of its own; and the composition root, `application.py`, which puts the real adapters together; and the build: the wheel holds every file of the package and nothing else | The emulator and the RDS instance (the build tests need only uv) |
-| End to end | `tests/e2e/` | A real browser through the load balancer: signing with a picture, refusals, uploads over the app's and nginx's limits, no JavaScript, plain HTTP, a network that fails, a flood of posts | Everything deployed |
+| End to end | `tests/e2e/` | A real browser through the load balancer: signing with a picture, refusals, uploads over the app's and nginx's limits, no JavaScript, the redirect from plain HTTP and the HTTPS-only rule, a network that fails, a flood of posts | Everything deployed |
 
 ### What protects the guestbook
 
@@ -266,6 +268,7 @@ The guestbook has no accounts: anybody may sign. These keep that from being abus
 | Against | What | Where |
 |---|---|---|
 | A page of another site posting in a visitor's name | A random token, given in a cookie and in the form; a post needs both, equal. Answer: 403 | `guestbook/infrastructure/web/csrf.py` |
+| Somebody listening on the network | HTTPS only: plain HTTP answers 301 to HTTPS, every answer tells the browser to use HTTPS only for a year (HSTS), and the token's cookie is `Secure` with the `__Host-` prefix | `terraform/main.tf` (the HTTP listener), `nginx.conf.j2`, `csrf.py` |
 | A flood of posts | One address may sign twice a second on average, 20 at once. Answer: 429. Reading is not limited | `ansible/templates/nginx.conf.j2`, `signing_rate` and `signing_burst` in the playbook |
 | Uploads that are too big | 2 MB for a picture (the app), 3 MB for a request (nginx). Answer: 400 or 413, same sentence | `guestbook/domain/picture.py`, `nginx.conf.j2` |
 | Files that are not pictures | The bytes decide the format, never the file's name or what the browser says | `guestbook/domain/picture.py` |
@@ -304,6 +307,9 @@ factor, and explains ports and adapters, SOLID and the architecture, with diagra
   migrations: the older release meets the newer tables.
 - **Floci keeps its state in memory.** Restarting its container, Docker Desktop or the laptop
   loses every emulated resource. Then destroy what is left and start again from step 2.
+- **One setting is the emulator's, not AWS's.** The HTTP listener's redirect uses the path
+  `#{path}`, because Floci keeps the leading `/` in it. On AWS, which removes that slash and
+  refuses a path without one, it must be `/#{path}` (`terraform/main.tf` says so too).
 - **Security groups and IAM policies are recorded, not enforced.** The role's policy is there
   to show the shape; the emulator would let the app do anything.
 - **The versions are pinned:** Floci 2.5.0 by digest, and Amazon Linux 2023 as of June 2026
