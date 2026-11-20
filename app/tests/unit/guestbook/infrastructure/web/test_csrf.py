@@ -13,6 +13,7 @@ from guestbook.infrastructure.web.csrf import (
     csrf_tokens_match,
     new_csrf_token,
 )
+from tests.conftest import VISITOR_BASE_URL
 from tests.fakes import InMemoryMessageRepository
 
 pytestmark = pytest.mark.unit
@@ -64,8 +65,34 @@ def test_the_page_gives_the_same_token_in_a_cookie_and_in_the_form(new_visitor: 
     assert 'samesite=strict' in cookie
 
 
+def test_the_cookie_is_sent_over_https_only_and_to_this_host_only(new_visitor: TestClient) -> None:
+    # A browser keeps a "__Host-" cookie only when it is Secure, for the path "/" and names no
+    # domain; otherwise it drops it, and every post would be refused.
+    answer = new_visitor.get('/')
+
+    name, _, attributes = answer.headers['Set-Cookie'].partition('=')
+    attribute_names = {part.strip().split('=')[0].lower() for part in attributes.split(';')[1:]}
+    assert name == CSRF_COOKIE_NAME
+    assert name.startswith('__Host-')
+    assert 'secure' in attribute_names
+    assert 'path=/' in answer.headers['Set-Cookie'].lower().replace(' ', '')
+    assert 'domain' not in attribute_names
+
+
+def test_over_plain_http_the_cookie_does_not_come_back(app: FastAPI) -> None:
+    # What a browser does too: a Secure cookie stays home when the page is plain HTTP. So the
+    # guestbook works over HTTPS only, and the load balancer sends plain HTTP there.
+    over_plain_http = TestClient(app, base_url='http://testserver')
+    token = token_in_the_form(over_plain_http.get('/').text)
+
+    answer = over_plain_http.post('/messages', data={**A_MESSAGE, CSRF_FIELD_NAME: token})
+
+    assert answer.status_code == 403
+    assert answer.text == OUT_OF_DATE
+
+
 def test_two_visitors_get_different_tokens_and_each_keeps_theirs(app: FastAPI, new_visitor: TestClient) -> None:
-    first, second = new_visitor, TestClient(app)
+    first, second = new_visitor, TestClient(app, base_url=VISITOR_BASE_URL)
 
     first_token = token_in_the_form(first.get('/').text)
 

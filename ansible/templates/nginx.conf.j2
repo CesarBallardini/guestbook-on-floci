@@ -38,6 +38,12 @@ http {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
 
+        # The browser is told to use HTTPS only, for a year, on this host and every subdomain:
+        # it then never tries plain HTTP, where somebody in the way could answer instead. Here,
+        # not in the app, so that nginx's own answers (413, 429) carry it too. "always": on
+        # every status. No location below sets a header of its own, so all of them inherit it.
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
         # The page shows the text of a refused post next to the form. Without these, a visitor
         # would read nginx's own HTML pages there. The first has the same words as the app's.
         # (nginx has no way to write a line break in a text but to break the line.)

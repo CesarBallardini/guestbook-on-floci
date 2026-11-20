@@ -29,8 +29,8 @@ rollback: ## Run the release before the current one (the database's migrations a
 idempotence: deploy ## Deploy, then run the playbook again and fail unless that second run changes nothing
 	docker compose run --rm --entrypoint sh ansible /work/ansible/check-idempotence.sh
 
-smoke: ## Check the running stack: the guestbook answers through both listeners, and Terraform has nothing to change
-	curl --fail --silent --show-error http://localhost:8080/health
+smoke: ## Check the running stack: HTTPS answers, HTTP redirects to it, and Terraform has nothing to change
+	curl --fail --silent --show-error --insecure --location --max-redirs 1 --proto-redir =https http://localhost:8080/health
 	curl --fail --silent --show-error --insecure https://localhost:8443/health
 	$(TERRAFORM) plan -input=false -detailed-exitcode
 

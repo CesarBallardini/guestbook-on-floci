@@ -12,7 +12,9 @@ that the post comes from a page the guestbook itself served to this browser.
 import hmac
 import secrets
 
-CSRF_COOKIE_NAME = 'guestbook_csrf'
+# The "__Host-" prefix: a browser keeps the cookie only if it came over HTTPS, is marked Secure,
+# names no domain and is for every path. So no other host, not even a subdomain, can set it.
+CSRF_COOKIE_NAME = '__Host-guestbook_csrf'
 CSRF_FIELD_NAME = 'csrf_token'
 CSRF_HEADER_NAME = 'X-CSRF-Token'
 _TOKEN_BYTES = 32

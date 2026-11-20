@@ -1,5 +1,5 @@
 output "urls" {
-  description = "The guestbook, through the load balancer. It answers once Ansible has run."
+  description = "The guestbook, through the load balancer. It answers once Ansible has run. The HTTP URL only redirects to the HTTPS one."
   value = {
     http  = "http://localhost:${var.listener_port}/"
     https = "https://localhost:${var.https_listener_port}/"

@@ -185,14 +185,26 @@ resource "aws_lb_listener" "https" {
   }
 }
 
+# Plain HTTP serves nothing: it sends the browser to the same address over HTTPS. The host, the
+# path and the query are kept. Everything behind this load balancer is a page for a browser,
+# so nothing is redirected that a program would rather see refused.
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.guestbook.arn
   port              = var.listener_port
   protocol          = "HTTP"
 
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.app.arn
+    type = "redirect"
+
+    redirect {
+      protocol = "HTTPS"
+      port     = tostring(var.https_listener_port)
+      # Floci 2.5.0 keeps the leading "/" in #{path}; AWS removes it. With the usual "/#{path}"
+      # the emulator would send the browser to "//". On AWS this must be "/#{path}", the
+      # default: AWS refuses a path that does not start with "/".
+      path        = "#{path}"
+      status_code = "HTTP_301"
+    }
   }
 }
 

@@ -83,10 +83,10 @@ def create_fastapi_app(
                 'accepted_content_types': ','.join(picture_format.content_type for picture_format in PICTURE_FORMATS),
             },
         )
-        # No script may read it, and the browser sends it with the guestbook's own pages only.
-        # Not marked "secure": the guestbook is also served over plain HTTP, where a browser
-        # would then never send it back.
-        response.set_cookie(CSRF_COOKIE_NAME, csrf_token, httponly=True, samesite='strict')
+        # No script may read it, the browser sends it with the guestbook's own pages only, and
+        # only over HTTPS. The app itself sees plain HTTP from the load balancer; the browser
+        # does not, and that is what the attribute is for.
+        response.set_cookie(CSRF_COOKIE_NAME, csrf_token, secure=True, httponly=True, samesite='strict')
         return response
 
     @app.post('/messages')

@@ -18,6 +18,10 @@ from tests.fakes import (
     SequenceUuidGeneratorAdapter,
 )
 
+# Visitors reach the guestbook over HTTPS only. A test client, like a browser, never sends a
+# Secure cookie over plain HTTP, so the token's cookie would not come back without this.
+VISITOR_BASE_URL = 'https://testserver'
+
 # A real image, one transparent pixel, so a browser can show it.
 PNG_BYTES = base64.b64decode(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
@@ -79,7 +83,7 @@ def client(app: FastAPI) -> TestClient:
     visit, so this does not depend on the page being available now. `new_visitor` is one who
     never opened the page; tests/unit/.../web/test_csrf.py follows the token from the page itself.
     """
-    client = TestClient(app, follow_redirects=False)
+    client = TestClient(app, base_url=VISITOR_BASE_URL, follow_redirects=False)
     csrf_token = new_csrf_token()
     client.cookies.set(CSRF_COOKIE_NAME, csrf_token)
     client.headers[CSRF_HEADER_NAME] = csrf_token
@@ -88,4 +92,4 @@ def client(app: FastAPI) -> TestClient:
 
 @pytest.fixture
 def new_visitor(app: FastAPI) -> TestClient:
-    return TestClient(app, follow_redirects=False)
+    return TestClient(app, base_url=VISITOR_BASE_URL, follow_redirects=False)

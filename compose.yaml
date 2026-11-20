@@ -37,7 +37,7 @@ services:
       - ./floci/image-catalog.yaml:/etc/floci/image-catalog.yaml:ro
     ports:
       - "127.0.0.1:4566:4566"  # the AWS API, for Terraform and the AWS CLI
-      - "127.0.0.1:8080:8080"  # the load balancer's HTTP listener
+      - "127.0.0.1:8080:8080"  # the load balancer's HTTP listener: it only redirects to HTTPS
       - "127.0.0.1:8443:8443"  # the load balancer's HTTPS listener
       - "127.0.0.1:7001:7001"  # the RDS instance, for psql from the host
     networks:

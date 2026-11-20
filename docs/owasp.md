@@ -57,17 +57,17 @@ Three things to keep in mind:
 ## 3. Summary
 
 Of the 345 requirements, 190 are about something the guestbook does not have. Of the
-155 that apply, it complies with 65, in part with 21, and not with 62;
+155 that apply, it complies with 70, in part with 21, and not with 57;
 7 are not checked.
 
 By level:
 
 | Level | Requirements | Yes | Partly | No | Not checked | n/a |
 |---|---|---|---|---|---|---|
-| 1 | 70 | 21 | 4 | 5 | 0 | 40 |
-| 2 | 183 | 32 | 15 | 31 | 1 | 104 |
+| 1 | 70 | 24 | 4 | 2 | 0 | 40 |
+| 2 | 183 | 34 | 15 | 29 | 1 | 104 |
 | 3 | 92 | 12 | 2 | 26 | 6 | 46 |
-| All | 345 | 65 | 21 | 62 | 7 | 190 |
+| All | 345 | 70 | 21 | 57 | 7 | 190 |
 
 By chapter:
 
@@ -75,8 +75,8 @@ By chapter:
 |---|---|---|---|---|---|---|
 | [V1 Encoding and Sanitization](#v1-encoding-and-sanitization) | 30 | 12 | 0 | 0 | 0 | 18 |
 | [V2 Validation and Business Logic](#v2-validation-and-business-logic) | 13 | 4 | 3 | 1 | 0 | 5 |
-| [V3 Web Frontend Security](#v3-web-frontend-security) | 31 | 10 | 3 | 12 | 1 | 5 |
-| [V4 API and Web Service](#v4-api-and-web-service) | 16 | 5 | 0 | 1 | 3 | 7 |
+| [V3 Web Frontend Security](#v3-web-frontend-security) | 31 | 13 | 3 | 9 | 1 | 5 |
+| [V4 API and Web Service](#v4-api-and-web-service) | 16 | 6 | 0 | 0 | 3 | 7 |
 | [V5 File Handling](#v5-file-handling) | 13 | 4 | 1 | 5 | 0 | 3 |
 | [V6 Authentication](#v6-authentication) | 47 | 0 | 0 | 0 | 0 | 47 |
 | [V7 Session Management](#v7-session-management) | 19 | 0 | 0 | 0 | 0 | 19 |
@@ -84,14 +84,14 @@ By chapter:
 | [V9 Self-contained Tokens](#v9-self-contained-tokens) | 7 | 0 | 0 | 0 | 0 | 7 |
 | [V10 OAuth and OIDC](#v10-oauth-and-oidc) | 36 | 0 | 0 | 0 | 0 | 36 |
 | [V11 Cryptography](#v11-cryptography) | 24 | 8 | 1 | 5 | 0 | 10 |
-| [V12 Secure Communication](#v12-secure-communication) | 12 | 0 | 2 | 9 | 0 | 1 |
+| [V12 Secure Communication](#v12-secure-communication) | 12 | 1 | 2 | 8 | 0 | 1 |
 | [V13 Configuration](#v13-configuration) | 21 | 4 | 4 | 12 | 0 | 1 |
 | [V14 Data Protection](#v14-data-protection) | 13 | 6 | 0 | 6 | 0 | 1 |
 | [V15 Secure Coding and Architecture](#v15-secure-coding-and-architecture) | 21 | 7 | 3 | 5 | 3 | 3 |
 | [V16 Security Logging and Error Handling](#v16-security-logging-and-error-handling) | 17 | 5 | 4 | 6 | 0 | 2 |
 | [V17 WebRTC](#v17-webrtc) | 12 | 0 | 0 | 0 | 0 | 12 |
 
-The Level 1 requirements that are open: 2.1.1, 3.2.1, 3.3.1, 3.4.1, 12.1.1, 12.2.1, 12.2.2, 15.1.1, 15.2.1.
+The Level 1 requirements that are open: 2.1.1, 3.2.1, 12.1.1, 12.2.2, 15.1.1, 15.2.1.
 
 ## 4. Every requirement
 
@@ -209,9 +209,9 @@ The "Requirement" column is the text of the standard, word for word.
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 3.3.1 | 1 | Verify that cookies have the 'Secure' attribute set, and if the '__Host-' prefix is not used for the cookie name, the '__Secure-' prefix must be used for the cookie name. | ❌ No | The cookie has no `Secure` attribute: the guestbook is also served over plain HTTP |
+| 3.3.1 | 1 | Verify that cookies have the 'Secure' attribute set, and if the '__Host-' prefix is not used for the cookie name, the '__Secure-' prefix must be used for the cookie name. | ✅ Yes | The token's cookie is `__Host-guestbook_csrf`, marked `Secure`; plain HTTP only redirects to HTTPS. A unit test checks the attributes, an end-to-end test the deployed answer |
 | 3.3.2 | 2 | Verify that each cookie's 'SameSite' attribute value is set according to the purpose of the cookie, to limit exposure to user interface redress attacks and browser-based request forgery attacks, commonly known as cross-site request forgery (CSRF). | ✅ Yes | `SameSite=Strict` |
-| 3.3.3 | 2 | Verify that cookies have the '__Host-' prefix for the cookie name unless they are explicitly designed to be shared with other hosts. | ❌ No | The cookie is `guestbook_csrf`, without the `__Host-` prefix |
+| 3.3.3 | 2 | Verify that cookies have the '__Host-' prefix for the cookie name unless they are explicitly designed to be shared with other hosts. | ✅ Yes | `__Host-guestbook_csrf`: `Secure`, `Path=/`, no `Domain` |
 | 3.3.4 | 2 | Verify that if the value of a cookie is not meant to be accessible to client-side scripts (such as a session token), the cookie must have the 'HttpOnly' attribute set and the same value (e. g. session token) must only be transferred to the client via the 'Set-Cookie' header field. | ❌ No | The cookie is `HttpOnly`, but its value is also written in the form |
 | 3.3.5 | 3 | Verify that when the application writes a cookie, the cookie name and value length combined are not over 4096 bytes. Overly large cookies will not be stored by the browser and therefore not sent with requests, preventing the user from using application functionality which relies on that cookie. | ✅ Yes | Name and value are under 100 bytes |
 
@@ -219,7 +219,7 @@ The "Requirement" column is the text of the standard, word for word.
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 3.4.1 | 1 | Verify that a Strict-Transport-Security header field is included on all responses to enforce an HTTP Strict Transport Security (HSTS) policy. A maximum age of at least 1 year must be defined, and for L2 and up, the policy must apply to all subdomains as well. | ❌ No | No `Strict-Transport-Security` header |
+| 3.4.1 | 1 | Verify that a Strict-Transport-Security header field is included on all responses to enforce an HTTP Strict Transport Security (HSTS) policy. A maximum age of at least 1 year must be defined, and for L2 and up, the policy must apply to all subdomains as well. | ✅ Yes | nginx sends `max-age=31536000; includeSubDomains` on every answer, its own 413 and 429 included; end-to-end tests check it on the page and on a 429. The load balancer's redirect over plain HTTP has none, where a browser would ignore it. Browsers act on it only with a trusted certificate, so on AWS, not in the emulator |
 | 3.4.2 | 1 | Verify that the Cross-Origin Resource Sharing (CORS) Access-Control-Allow-Origin header field is a fixed value by the application, or if the Origin HTTP request header field value is used, it is validated against an allowlist of trusted origins. When 'Access-Control-Allow-Origin: \*' needs to be used, verify that the response does not include any sensitive information. | ✅ Yes | The app sends no CORS header |
 | 3.4.3 | 2 | Verify that HTTP responses include a Content-Security-Policy response header field which defines directives to ensure the browser only loads and executes trusted content or resources, in order to limit execution of malicious JavaScript. As a minimum, a global policy must be used which includes the directives object-src 'none' and base-uri 'none' and defines either an allowlist or uses nonces or hashes. For an L3 application, a per-response policy with nonces or hashes must be defined. | ❌ No | No `Content-Security-Policy`; the page has an inline `<style>` and inline `hx-on` handlers |
 | 3.4.4 | 2 | Verify that all HTTP responses contain an 'X-Content-Type-Options: nosniff' header field. This instructs browsers not to use content sniffing and MIME type guessing for the given response, and to require the response's Content-Type header field value to match the destination resource. For example, the response to a request for a style is only accepted if the response's Content-Type is 'text/css'. This also enables the use of the Cross-Origin Read Blocking (CORB) functionality by the browser. | 🟡 Partly | Only on pictures |
@@ -264,7 +264,7 @@ The "Requirement" column is the text of the standard, word for word.
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
 | 4.1.1 | 1 | Verify that every HTTP response with a message body contains a Content-Type header field that matches the actual content of the response, including the charset parameter to specify safe character encoding (e.g., UTF-8, ISO-8859-1) according to IANA Media Types, such as "text/", "/+xml" and "/xml". | ✅ Yes | Checked on every kind of answer; texts carry `charset=utf-8`. The 404 is JSON |
-| 4.1.2 | 2 | Verify that only user-facing endpoints (intended for manual web-browser access) automatically redirect from HTTP to HTTPS, while other services or endpoints do not implement transparent redirects. This is to avoid a situation where a client is erroneously sending unencrypted HTTP requests, but since the requests are being automatically redirected to HTTPS, the leakage of sensitive data goes undiscovered. | ❌ No | The HTTP listener serves the guestbook; it does not redirect |
+| 4.1.2 | 2 | Verify that only user-facing endpoints (intended for manual web-browser access) automatically redirect from HTTP to HTTPS, while other services or endpoints do not implement transparent redirects. This is to avoid a situation where a client is erroneously sending unencrypted HTTP requests, but since the requests are being automatically redirected to HTTPS, the leakage of sensitive data goes undiscovered. | ✅ Yes | The HTTP listener redirects to HTTPS. Everything behind it is for a browser: the page, its form, its pictures and static files. The load balancer's health check goes to the instance directly |
 | 4.1.3 | 2 | Verify that any HTTP header field used by the application and set by an intermediary layer, such as a load balancer, a web proxy, or a backend-for-frontend service, cannot be overridden by the end-user. Example headers might include X-Real-IP, X-Forwarded-\*, or X-User-ID. | ✅ Yes | nginx takes the address from `X-Forwarded-For` only when the connection comes from `load_balancer_cidr` |
 | 4.1.4 | 3 | Verify that only HTTP methods that are explicitly supported by the application or its API (including OPTIONS during preflight requests) can be used and that unused methods are blocked. | ✅ Yes | Other methods are answered 405, `TRACE` included |
 | 4.1.5 | 3 | Verify that per-message digital signatures are used to provide additional assurance on top of transport protections for requests or transactions which are highly sensitive or which traverse a number of systems. | ➖ n/a | No highly sensitive transaction |
@@ -684,7 +684,7 @@ Does not apply: no OAuth, no OIDC.
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 12.2.1 | 1 | Verify that TLS is used for all connectivity between a client and external facing, HTTP-based services, and does not fall back to insecure or unencrypted communications. | ❌ No | The HTTP listener on 8080 serves the guestbook |
+| 12.2.1 | 1 | Verify that TLS is used for all connectivity between a client and external facing, HTTP-based services, and does not fall back to insecure or unencrypted communications. | ✅ Yes | The HTTP listener on 8080 serves nothing: it answers 301 to the same address over HTTPS. An end-to-end test checks it |
 | 12.2.2 | 1 | Verify that external facing services use publicly trusted TLS certificates. | ❌ No | The certificate is the emulator's own. Only closable on AWS |
 
 #### V12.3 General Service to Service Communication Security
