@@ -1,0 +1,41 @@
+; supervisord, the instance's process manager: it starts gunicorn and nginx, restarts them when
+; they die and collects what they write. On a real instance systemd would do this; the
+; emulated one is a container and has none.
+
+[supervisord]
+user = root
+pidfile = /run/supervisord.pid
+logfile = /var/log/supervisord.log
+
+; How supervisorctl talks to supervisord: a socket only root can open.
+[unix_http_server]
+file = /run/supervisor.sock
+chmod = 0700
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
+[supervisorctl]
+serverurl = unix:///run/supervisor.sock
+
+; The guestbook. It runs in the foreground and writes no pid file. The command goes through
+; the "current" link, so a restart runs the current release with that release's config.
+; "exec" makes gunicorn the process supervisord watches and signals, not the shell.
+[program:guestbook]
+command = /bin/sh -c 'set -a; . {{ current_link }}/guestbook.env; set +a; exec {{ current_link }}/venv/bin/gunicorn --config /etc/guestbook-gunicorn.conf.py --preload --bind 127.0.0.1:{{ gunicorn_port }} --workers 2 --worker-class uvicorn_worker.UvicornWorker application:application'
+autorestart = true
+; A gunicorn that cannot take its port gives up after five seconds. Only one that outlives
+; that counts as started; otherwise supervisord tries again, and then says FATAL.
+startsecs = 8
+; On SIGTERM gunicorn lets its workers finish their requests: up to 30 seconds.
+stopsignal = TERM
+stopwaitsecs = 30
+; What the app logs goes to standard output and standard error: one stream, kept here.
+redirect_stderr = true
+stdout_logfile = /var/log/guestbook.log
+
+[program:nginx]
+command = nginx -g 'daemon off;'
+autorestart = true
+redirect_stderr = true
+stdout_logfile = /var/log/nginx/supervised.log

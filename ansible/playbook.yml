@@ -9,25 +9,25 @@
 # folder of its own on the instance, with the config next to it, and nothing in it changes
 # afterwards. What runs is the release that the "current" link points at.
 #
-# The instance is a container without systemd, so nginx and gunicorn are started as daemons and
-# found again by their pid files.
+# The instance is a container without systemd, so supervisord is its process manager: it runs
+# nginx and gunicorn in the foreground. The playbook starts supervisord, the one daemon here.
 - name: Release and run the guestbook
   hosts: all
   gather_facts: false
   vars:
     minimum_python_version: "3.14.5"
     uv_version: "0.13.7"
+    supervisor_version: "4.3.0"
     # What "make build" made: one wheel, and requirements.txt with the locked dependencies.
     build_dir: "{{ playbook_dir }}/../app/dist"
     app_dir: /opt/guestbook
     releases_dir: "{{ app_dir }}/releases"
-    # The release that runs. gunicorn is started through this link.
+    # The release that runs. supervisord starts gunicorn through this link.
     current_link: "{{ app_dir }}/current"
     # How many releases stay on the instance to go back to.
     releases_kept: 5
     # "-e rollback=true": make no release, and run the one before the current one.
     rollback: false
-    gunicorn_pid_file: /run/guestbook.pid
     gunicorn_port: 8000
     # How often one address may sign the guestbook (nginx's limit_req): the average rate, and
     # how many posts may come at once before the rate applies. A person never gets near; a
@@ -65,8 +65,9 @@
         fail_msg: "Python {{ python_version.stdout }} is older than {{ minimum_python_version }}"
         success_msg: "{{ system_release.stdout }}, Python {{ python_version.stdout }}"
 
-    # A stopped daemon stays in the process table as a zombie: the instance's first process is
-    # not an init and never collects it. So "is it running" asks for a process that isn't one.
+    # For supervisord, the one daemon here. A stopped daemon stays in the process table as a
+    # zombie: the instance's first process is not an init and never collects it. So "is it
+    # running" asks for a process that isn't one.
     - name: Install the check for a running daemon
       ansible.builtin.copy:
         dest: /usr/local/bin/pid-file-alive
@@ -81,6 +82,11 @@
       ansible.builtin.command: python3.14 -m pip install --disable-pip-version-check uv=={{ uv_version }}
       register: uv_install
       changed_when: "'Successfully installed' in uv_install.stdout"
+
+    - name: Install supervisord
+      ansible.builtin.command: python3.14 -m pip install --disable-pip-version-check supervisor=={{ supervisor_version }}
+      register: supervisor_install
+      changed_when: "'Successfully installed' in supervisor_install.stdout"
 
     # ---- Which release runs now, and which ones are there -----------------------------------
 
@@ -264,13 +270,13 @@
         src: "{{ releases_dir }}/{{ target_release_id }}"
         dest: "{{ current_link }}"
         state: link
-      notify: Stop gunicorn
+      notify: Restart the guestbook
 
     - name: Remove the oldest releases
       ansible.builtin.file:
         path: "{{ releases_dir }}/{{ item }}"
         state: absent
-      loop: "{{ ((release_ids + [target_release_id]) | unique | sort)[:-(releases_kept | int)] | difference([target_release_id]) }}"
+      loop: "{{ ((release_ids + [target_release_id]) | unique | sort)[: -(releases_kept | int)] | difference([target_release_id]) }}"
       when: not (rollback | bool)
 
     - name: Configure nginx
@@ -281,31 +287,56 @@
         validate: nginx -t -c %s
       notify: Reload nginx
 
-    - name: Stop or reload what changed, before the tasks that start it
+    # A worker dies with its master: see the file.
+    - name: Configure gunicorn
+      ansible.builtin.copy:
+        src: gunicorn.conf.py
+        dest: /etc/guestbook-gunicorn.conf.py
+        mode: "0644"
+      notify: Restart the guestbook
+
+    # The process manager: it runs gunicorn and nginx in the foreground, restarts them when they
+    # die and keeps what they write. Neither is a daemon and the app writes no pid file.
+    - name: Configure supervisord
+      ansible.builtin.template:
+        src: supervisord.conf.j2
+        dest: /etc/supervisord.conf
+        mode: "0644"
+      notify: Update supervisord
+
+    - name: Restart or reload what changed, before the tasks that start it
       ansible.builtin.meta: flush_handlers
 
-    # --capture-output: what the app logs goes to standard error, which a daemon otherwise
-    # throws away. With it, a storage failure and its cause are in the log file.
-    - name: Start gunicorn unless it is running
+    # The one daemon the playbook starts itself: on a real instance systemd would, at boot.
+    # It starts the guestbook and nginx. The loop waits until it answers supervisorctl.
+    - name: Start supervisord unless it is running
       ansible.builtin.shell: |
-        set -e
-        if pid-file-alive {{ gunicorn_pid_file }}; then exit 0; fi
-        set -a; . {{ current_link }}/guestbook.env; set +a
-        {{ current_link }}/venv/bin/gunicorn --daemon --preload --pid {{ gunicorn_pid_file }} \
-          --bind 127.0.0.1:{{ gunicorn_port }} --workers 2 \
-          --worker-class uvicorn_worker.UvicornWorker \
-          --error-logfile /var/log/guestbook.log --capture-output application:application
-        echo started
-      register: gunicorn_start
-      changed_when: "'started' in gunicorn_start.stdout"
+        if pid-file-alive /run/supervisord.pid; then exit 0; fi
+        supervisord --configuration /etc/supervisord.conf || exit 1
+        for attempt in $(seq 50); do
+          supervisorctl pid > /dev/null 2>&1 && { echo started; exit 0; }
+          sleep 0.2
+        done
+        echo "supervisord did not answer" >&2
+        exit 1
+      register: supervisord_start
+      changed_when: "'started' in supervisord_start.stdout"
 
-    - name: Start nginx unless it is running
+    # supervisord gives up on a program that fails to start several times in a row, and leaves
+    # alone one that was stopped by hand.
+    - name: Start the programs that are not running
       ansible.builtin.shell: |
-        if pid-file-alive /run/nginx.pid; then exit 0; fi
-        nginx
-        echo started
-      register: nginx_start
-      changed_when: "'started' in nginx_start.stdout"
+        state="$(supervisorctl status {{ item }} || true)"
+        case "$state" in
+          *RUNNING*) ;;
+          *STARTING*) ;;
+          *) supervisorctl start {{ item }} && echo started ;;
+        esac
+      loop:
+        - guestbook
+        - nginx
+      register: program_start
+      changed_when: "'started' in program_start.stdout"
 
     - name: Check that the guestbook answers through nginx
       ansible.builtin.uri:
@@ -320,26 +351,28 @@
       ansible.builtin.debug:
         msg: "Release {{ target_release_id }} runs."
 
+  # Each one does nothing while supervisord is not running yet: the task that starts it then
+  # starts everything from what is on the instance by then.
   handlers:
-    - name: Stop gunicorn
+    - name: Update supervisord
       ansible.builtin.shell: |
-        pid-file-alive {{ gunicorn_pid_file }} || exit 0
-        pid="$(cat {{ gunicorn_pid_file }})"
-        # gunicorn deletes its pid file as it stops: keep the number to watch the process.
-        pid_copy="$(mktemp)"; trap 'rm -f "$pid_copy"' EXIT; echo "$pid" > "$pid_copy"
-        kill "$pid"
-        # Up to 30 seconds: gunicorn lets its workers finish their requests.
-        for attempt in $(seq 150); do
-          pid-file-alive "$pid_copy" || { echo stopped; exit 0; }
-          sleep 0.2
-        done
-        echo "gunicorn (pid $pid) did not stop" >&2
-        exit 1
-      register: gunicorn_stop
-      changed_when: "'stopped' in gunicorn_stop.stdout"
+        pid-file-alive /run/supervisord.pid || exit 0
+        supervisorctl update
+      register: supervisord_update
+      changed_when: supervisord_update.stdout != ''
+
+    # supervisord sends SIGTERM, gunicorn lets its workers finish their requests, and the new
+    # process runs the release that "current" points at now.
+    - name: Restart the guestbook
+      ansible.builtin.shell: |
+        pid-file-alive /run/supervisord.pid || exit 0
+        supervisorctl restart guestbook
+      register: guestbook_restart
+      changed_when: "'started' in guestbook_restart.stdout"
 
     - name: Reload nginx
       ansible.builtin.shell: |
-        if pid-file-alive /run/nginx.pid; then nginx -s reload; echo reloaded; fi
+        pid-file-alive /run/supervisord.pid || exit 0
+        supervisorctl signal HUP nginx
       register: nginx_reload
-      changed_when: "'reloaded' in nginx_reload.stdout"
+      changed_when: "'signalled' in nginx_reload.stdout"

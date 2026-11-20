@@ -82,24 +82,32 @@ services: easy to deploy, to move between environments and to scale. How the gue
 | V. Build, release, run | Separate the three stages        | A wheel and the locked dependencies are built on the laptop; a release is that build plus the config, in its own folder on the instance; gunicorn runs the current one | Yes         |
 | VI. Processes          | Stateless, sharing nothing       | Messages in PostgreSQL, pictures in S3, the form's token in the visitor's cookie. Nothing is kept in memory between requests                                           | Yes         |
 | VII. Port binding      | The app serves by binding a port | gunicorn serves HTTP on its own port; nginx only routes to it                                                                                                          | Yes         |
-| VIII. Concurrency      | Scale out with processes         | More gunicorn workers, or more instances. But gunicorn runs as a daemon with a pid file, which the factor asks not to do: the emulated instance has no process manager | **In part** |
+| VIII. Concurrency      | Scale out with processes         | More gunicorn workers, or more instances. supervisord, the process manager, runs gunicorn in the foreground and restarts it; no daemon, no pid file                    | Yes         |
 | IX. Disposability      | Start fast, stop gracefully      | Starts in seconds; on SIGTERM gunicorn finishes its requests and exits                                                                                                 | Yes         |
 | X. Dev/prod parity     | Keep environments alike          | The same PostgreSQL 16 and S3 protocol in the emulator as on AWS; the same locked dependencies                                                                         | Yes         |
-| XI. Logs               | Treat them as a stream of events | The app writes to standard output and never opens a log file. The playbook decides where the stream goes                                                               | Yes         |
+| XI. Logs               | Treat them as a stream of events | The app writes to standard output and never opens a log file. supervisord collects the stream and decides where it goes                                                | Yes         |
 | XII. Admin processes   | Run them as one-off processes    | `alembic upgrade head` runs on the instance, from the same code, with the same config                                                                                  | Yes         |
 
 ### Compliance
 
-**The guestbook meets eleven of the twelve factors.** One is not fully met, and it comes from
-how the deployment is done here, not from the app's code:
+**The guestbook meets the twelve factors.** One of them, VIII, carries a note that comes from
+the emulator, not from the app:
 
-- **VIII. Concurrency: met in part.** The app scales out with processes, as the factor asks.
-  But gunicorn runs as a daemon and writes a pid file, which the factor asks an app never to
-  do: starting and watching processes belongs to the system's process manager. The emulated
-  instance is a container without systemd, so it has none, and the playbook does that job.
-  On a real instance, a systemd unit would replace the daemon and the pid file.
+- **VIII. Concurrency: met, with a note.** The factor asks that an app never turn itself into
+  a daemon nor write a pid file: starting, watching and restarting processes belongs to the
+  system's process manager. Here that is supervisord. It runs gunicorn in the foreground,
+  restarts it when it dies and keeps what it writes; the same goes for nginx. The note: the
+  emulated instance is a container whose first process is not an init, so nothing starts
+  supervisord at boot. The playbook starts it, as the one daemon left, and after the
+  instance's container restarts nothing runs until the instance is replaced. On a real
+  instance systemd would start it, or run gunicorn itself from a unit.
 
-Two changes were needed to meet the other eleven.
+Three changes were needed to get here.
+
+For factor VIII, gunicorn lost `--daemon` and its pid file, and supervisord took over what
+the playbook's shell scripts did. One setting came with it, in `ansible/files/gunicorn.conf.py`:
+a worker dies with its master. Without it, a master killed outright leaves its workers
+holding the port, and the master that supervisord starts next can never take it.
 
 For factor V, the deploy has three stages, each with its own command and its own result:
 
@@ -107,7 +115,7 @@ For factor V, the deploy has three stages, each with its own command and its own
 | ------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Build   | The laptop   | `make build`: the app's wheel and `requirements.txt`, the locked dependencies with their hashes, in `app/dist/`. The same source gives the same bytes |
 | Release | The instance | The playbook: the build installed in a virtual environment, with the config next to it, in `/opt/guestbook/releases/<UTC time>`. Nothing in it changes afterwards |
-| Run     | The instance | gunicorn, started through the link `/opt/guestbook/current`, which points at one release                                                   |
+| Run     | The instance | supervisord runs gunicorn through the link `/opt/guestbook/current`, which points at one release                                           |
 
 A release is named by the moment it was made, such as `20261119T231500Z`. The same build with
 the same config is the same release, so deploying twice makes one. A new build or a new
@@ -116,6 +124,12 @@ limits remain: the dependencies are downloaded on the instance when a release is
 hashes in `requirements.txt` refuse anything that differs from the lock), and a rollback does
 not undo the database's migrations. Before, the playbook copied the source to the instance
 and installed the dependencies there, in place.
+
+A release is made from the wheel alone, so a file missing from the wheel is missing on the
+instance. Two tests guard that: `tests/integration/test_build.py` builds a wheel and fails
+unless it holds every file of the `guestbook` package and nothing but the app, and
+`tests/unit/guestbook/infrastructure/database/test_migrations.py` checks that `alembic.ini`
+finds the migrations by package, which is what lets the same file work from the wheel.
 
 For factor XI, `application.py` sets up logging itself: every event goes to standard output,
 from the level `LOG_LEVEL` names (`INFO` when not set). Before, the app had no logging of its
