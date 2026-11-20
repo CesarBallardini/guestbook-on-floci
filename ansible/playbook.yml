@@ -1,26 +1,32 @@
-# Installs the guestbook on the instance and starts it: nginx on port 80, in front of gunicorn.
+# Makes a release of the guestbook on the instance and runs it: nginx on port 80, in front of
+# gunicorn.
 #
-#   docker compose run --rm ansible      # from the folder above, after "terraform apply"
+#   make build                                      # from the folder above: the wheel, in app/dist/
+#   docker compose run --rm ansible                 # after "terraform apply" and "make build"
+#   docker compose run --rm ansible -e rollback=true    # run the release before the current one
+#
+# Build, release, run: the build is made on the laptop. A release is that build installed in a
+# folder of its own on the instance, with the config next to it, and nothing in it changes
+# afterwards. What runs is the release that the "current" link points at.
 #
 # The instance is a container without systemd, so nginx and gunicorn are started as daemons and
 # found again by their pid files.
-- name: Install and start the guestbook
+- name: Release and run the guestbook
   hosts: all
   gather_facts: false
   vars:
     minimum_python_version: "3.14.5"
     uv_version: "0.13.7"
-    app_source: "{{ playbook_dir }}/../app"
-    # What is copied besides the guestbook package: what gunicorn and Alembic run, and the two
-    # files that say what the app depends on.
-    app_root_files:
-      - application.py
-      - alembic.ini
-      - pyproject.toml
-      - uv.lock
+    # What "make build" made: one wheel, and requirements.txt with the locked dependencies.
+    build_dir: "{{ playbook_dir }}/../app/dist"
     app_dir: /opt/guestbook
-    venv_dir: /opt/guestbook-venv
-    environment_file: /etc/guestbook.env
+    releases_dir: "{{ app_dir }}/releases"
+    # The release that runs. gunicorn is started through this link.
+    current_link: "{{ app_dir }}/current"
+    # How many releases stay on the instance to go back to.
+    releases_kept: 5
+    # "-e rollback=true": make no release, and run the one before the current one.
+    rollback: false
     gunicorn_pid_file: /run/guestbook.pid
     gunicorn_port: 8000
     # How often one address may sign the guestbook (nginx's limit_req): the average rate, and
@@ -59,70 +65,6 @@
         fail_msg: "Python {{ python_version.stdout }} is older than {{ minimum_python_version }}"
         success_msg: "{{ system_release.stdout }}, Python {{ python_version.stdout }}"
 
-    - name: Create the app's folder
-      ansible.builtin.file:
-        path: "{{ app_dir }}"
-        state: directory
-        mode: "0755"
-
-    # What runs, and the two files that say what it depends on. The tests and the development
-    # tooling stay behind, and so do the __pycache__ folders that running the tests leaves.
-    - name: List the app's folders
-      ansible.builtin.find:
-        paths: "{{ app_source }}/guestbook"
-        recurse: true
-        file_type: directory
-        excludes: __pycache__
-      delegate_to: localhost
-      register: app_folders
-
-    - name: List the app's files
-      ansible.builtin.find:
-        paths: "{{ app_source }}/guestbook"
-        recurse: true
-        excludes: "*.pyc"
-      delegate_to: localhost
-      register: app_files
-
-    - name: Create the app's folders
-      ansible.builtin.file:
-        path: "{{ app_dir }}/{{ item }}"
-        state: directory
-        mode: "0755"
-      loop: "{{ ['guestbook'] + (app_folders.files | map(attribute='path') | map('relpath', app_source) | sort) }}"
-
-    - name: Copy the app
-      ansible.builtin.copy:
-        src: "{{ app_source }}/{{ item }}"
-        dest: "{{ app_dir }}/{{ item }}"
-        mode: "0644"
-      loop: "{{ app_root_files + (app_files.files | map(attribute='path') | map('relpath', app_source) | sort) }}"
-      loop_control:
-        label: "{{ item }}"
-      notify: Stop gunicorn
-
-    # Copying never deletes: a file that left the repository would stay on the instance, where
-    # Python could still import it. So the package on the instance is made to match exactly.
-    - name: List what is in the app's package on the instance
-      ansible.builtin.find:
-        paths: "{{ app_dir }}/guestbook"
-        recurse: true
-        file_type: any
-        excludes:
-          - __pycache__
-          - "*.pyc"
-      register: deployed_entries
-
-    - name: Remove what is no longer in the app
-      ansible.builtin.file:
-        path: "{{ app_dir }}/{{ item }}"
-        state: absent
-      loop: "{{ deployed_paths | difference(app_paths) | sort }}"
-      vars:
-        deployed_paths: "{{ deployed_entries.files | map(attribute='path') | map('relpath', app_dir) }}"
-        app_paths: "{{ (app_folders.files + app_files.files) | map(attribute='path') | map('relpath', app_source) }}"
-      notify: Stop gunicorn
-
     # A stopped daemon stays in the process table as a zombie: the instance's first process is
     # not an init and never collects it. So "is it running" asks for a process that isn't one.
     - name: Install the check for a running daemon
@@ -140,35 +82,196 @@
       register: uv_install
       changed_when: "'Successfully installed' in uv_install.stdout"
 
-    # The versions come from app/uv.lock, which --frozen forbids uv to change.
-    - name: Install the app's dependencies into its virtual environment
-      ansible.builtin.command: uv sync --frozen --no-dev --python /usr/bin/python3.14
-      args:
-        chdir: "{{ app_dir }}"
-      environment:
-        UV_PROJECT_ENVIRONMENT: "{{ venv_dir }}"
-        UV_PYTHON_DOWNLOADS: never
-      register: uv_sync
-      changed_when: "'Installed' in uv_sync.stderr or 'Uninstalled' in uv_sync.stderr"
+    # ---- Which release runs now, and which ones are there -----------------------------------
+
+    - name: Create the folder of the releases
+      ansible.builtin.file:
+        path: "{{ releases_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Read which release is the current one
+      ansible.builtin.stat:
+        path: "{{ current_link }}"
+      register: current_link_stat
+
+    - name: List the releases on the instance
+      ansible.builtin.find:
+        paths: "{{ releases_dir }}"
+        file_type: directory
+      register: release_folders
+
+    # A release is named by the moment it was made, in UTC: 20261119T231500Z. The names sort in
+    # the order the releases were made.
+    - name: Note the current release and the others
+      ansible.builtin.set_fact:
+        current_release_id: "{{ (current_link_stat.stat.lnk_source | basename) if current_link_stat.stat.exists else '' }}"
+        release_ids: "{{ release_folders.files | map(attribute='path') | map('basename') | sort }}"
+
+    # ---- Release: the build and the config, in a new folder ---------------------------------
+
+    - name: Make a release, unless the current one is this build with this config
+      when: not (rollback | bool)
+      block:
+        - name: Find the build
+          ansible.builtin.find:
+            paths: "{{ build_dir }}"
+            patterns: "*.whl"
+          delegate_to: localhost
+          register: build_wheels
+
+        - name: Check that there is one build
+          ansible.builtin.assert:
+            that: build_wheels.files | length == 1
+            fail_msg: "app/dist/ must hold exactly one wheel: run 'make build' first."
+            quiet: true
+
+        - name: Read the checksum of the build's wheel
+          ansible.builtin.stat:
+            path: "{{ build_wheels.files[0].path }}"
+            checksum_algorithm: sha256
+          delegate_to: localhost
+          register: build_wheel
+
+        - name: Read the checksum of the build's requirements
+          ansible.builtin.stat:
+            path: "{{ build_dir }}/requirements.txt"
+            checksum_algorithm: sha256
+          delegate_to: localhost
+          register: build_requirements
+
+        - name: Read what the current release was made from
+          ansible.builtin.slurp:
+            src: "{{ current_link }}/release_key"
+          register: current_release_key
+          when: current_release_id != ''
+
+        # The key says what a release is made from. The same build with the same config is the
+        # same release, so a second run makes none.
+        - name: Decide whether a new release is needed
+          ansible.builtin.set_fact:
+            release_key: "{{ wanted_key }}"
+            release_is_new: "{{ current_release_id == '' or (current_release_key.content | b64decode | trim) != wanted_key }}"
+            # set_fact fixes the moment: a plain variable would read the clock at every use.
+            release_datetime_utc_as_str: "{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}"
+          vars:
+            wanted_key: >-
+              {{ (build_wheel.stat.checksum ~ build_requirements.stat.checksum
+                  ~ lookup('ansible.builtin.template', 'guestbook.env.j2')) | hash('sha256') }}
+
+        - name: Note the release to run
+          ansible.builtin.set_fact:
+            target_release_id: "{{ release_datetime_utc_as_str if release_is_new else current_release_id }}"
+
+        - name: Make the release
+          when: release_is_new
+          vars:
+            new_release_dir: "{{ releases_dir }}/{{ target_release_id }}"
+            wheel_name: "{{ build_wheels.files[0].path | basename }}"
+          block:
+            - name: Create the release's folder
+              ansible.builtin.file:
+                path: "{{ new_release_dir }}/build"
+                state: directory
+                mode: "0755"
+
+            - name: Copy the build
+              ansible.builtin.copy:
+                src: "{{ item }}"
+                dest: "{{ new_release_dir }}/build/"
+                mode: "0644"
+              loop:
+                - "{{ build_wheels.files[0].path }}"
+                - "{{ build_dir }}/requirements.txt"
+              loop_control:
+                label: "{{ item | basename }}"
+
+            - name: Create the release's virtual environment
+              ansible.builtin.command: uv venv --python /usr/bin/python3.14 {{ new_release_dir }}/venv
+              environment:
+                UV_PYTHON_DOWNLOADS: never
+              args:
+                creates: "{{ new_release_dir }}/venv"
+
+            # The versions and the hashes come from app/uv.lock, through the build's
+            # requirements.txt. A package whose hash differs is refused.
+            - name: Install the locked dependencies
+              ansible.builtin.command: >-
+                uv pip install --python {{ new_release_dir }}/venv/bin/python
+                --require-hashes --requirement {{ new_release_dir }}/build/requirements.txt
+              changed_when: true
+
+            - name: Install the app
+              ansible.builtin.command: >-
+                uv pip install --python {{ new_release_dir }}/venv/bin/python
+                --no-deps {{ new_release_dir }}/build/{{ wheel_name }}
+              changed_when: true
+
+            - name: Write the release's config
+              ansible.builtin.template:
+                src: guestbook.env.j2
+                dest: "{{ new_release_dir }}/guestbook.env"
+                mode: "0600"
+
+            - name: Write what the release was made from
+              ansible.builtin.copy:
+                dest: "{{ new_release_dir }}/release_key"
+                mode: "0644"
+                content: "{{ release_key }}\n"
+          rescue:
+            - name: Remove the release that could not be made
+              ansible.builtin.file:
+                path: "{{ new_release_dir }}"
+                state: absent
+
+            - name: Stop here
+              ansible.builtin.fail:
+                msg: "The release could not be made. The current one, '{{ current_release_id }}', still runs."
+
+        # Before the switch: the release that is about to run finds its tables. Alembic runs the
+        # migrations the database doesn't have yet, and none when it is up to date.
+        - name: Bring the database's tables up to date
+          ansible.builtin.shell: |
+            set -e
+            release={{ releases_dir }}/{{ target_release_id }}
+            set -a; . "$release/guestbook.env"; set +a
+            alembic_ini="$("$release/venv/bin/python" -c \
+              'import guestbook, pathlib; print(pathlib.Path(guestbook.__file__).parent / "alembic.ini")')"
+            "$release/venv/bin/alembic" --config "$alembic_ini" upgrade head
+          register: database_migration
+          changed_when: "'Running upgrade' in database_migration.stderr"
+
+    # ---- Rollback: the release before the current one ---------------------------------------
+
+    # The database's migrations are not undone: an older release meets the newer tables.
+    - name: Choose the release before the current one
+      when: rollback | bool
+      block:
+        - name: Check that there is a release to go back to
+          ansible.builtin.assert:
+            that: release_ids | select('lt', current_release_id) | list | length > 0
+            fail_msg: "There is no release before the current one, '{{ current_release_id }}'."
+            quiet: true
+
+        - name: Note the release to run
+          ansible.builtin.set_fact:
+            target_release_id: "{{ release_ids | select('lt', current_release_id) | last }}"
+
+    # ---- Run --------------------------------------------------------------------------------
+
+    - name: Make the release the current one
+      ansible.builtin.file:
+        src: "{{ releases_dir }}/{{ target_release_id }}"
+        dest: "{{ current_link }}"
+        state: link
       notify: Stop gunicorn
 
-    - name: Write the app's environment
-      ansible.builtin.template:
-        src: guestbook.env.j2
-        dest: "{{ environment_file }}"
-        mode: "0600"
-      notify: Stop gunicorn
-
-    # Alembic runs the migrations the database doesn't have yet, and none when it is up to date.
-    - name: Bring the database's tables up to date
-      ansible.builtin.shell: |
-        set -e
-        set -a; . {{ environment_file }}; set +a
-        {{ venv_dir }}/bin/alembic upgrade head
-      args:
-        chdir: "{{ app_dir }}"
-      register: database_migration
-      changed_when: "'Running upgrade' in database_migration.stderr"
+    - name: Remove the oldest releases
+      ansible.builtin.file:
+        path: "{{ releases_dir }}/{{ item }}"
+        state: absent
+      loop: "{{ ((release_ids + [target_release_id]) | unique | sort)[:-(releases_kept | int)] | difference([target_release_id]) }}"
+      when: not (rollback | bool)
 
     - name: Configure nginx
       ansible.builtin.template:
@@ -187,9 +290,9 @@
       ansible.builtin.shell: |
         set -e
         if pid-file-alive {{ gunicorn_pid_file }}; then exit 0; fi
-        set -a; . {{ environment_file }}; set +a
-        {{ venv_dir }}/bin/gunicorn --daemon --preload --pid {{ gunicorn_pid_file }} \
-          --bind 127.0.0.1:{{ gunicorn_port }} --workers 2 --chdir {{ app_dir }} \
+        set -a; . {{ current_link }}/guestbook.env; set +a
+        {{ current_link }}/venv/bin/gunicorn --daemon --preload --pid {{ gunicorn_pid_file }} \
+          --bind 127.0.0.1:{{ gunicorn_port }} --workers 2 \
           --worker-class uvicorn_worker.UvicornWorker \
           --error-logfile /var/log/guestbook.log --capture-output application:application
         echo started
@@ -212,6 +315,10 @@
       until: health.status == 200
       retries: 10
       delay: 1
+
+    - name: Say which release runs
+      ansible.builtin.debug:
+        msg: "Release {{ target_release_id }} runs."
 
   handlers:
     - name: Stop gunicorn

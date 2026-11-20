@@ -1,7 +1,7 @@
 # Floci: looking at what is running
 
 Three ways to see the resources the guestbook uses in the emulator: the web console, the
-emulator's own URLs, and the AWS CLI. All of them need the stack up (README, steps 2 to 4).
+emulator's own URLs, and the AWS CLI. All of them need the stack up (README, steps 2 to 5).
 
 ## 1. The web console
 

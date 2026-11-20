@@ -11,7 +11,7 @@ The tools are split the way they are on a real site:
 | Tool | Does |
 |---|---|
 | **Terraform** | Creates the infrastructure in the emulator: an EC2 instance, a PostgreSQL RDS instance, an S3 bucket, an IAM role for the instance, and a load balancer with HTTP and HTTPS listeners |
-| **Ansible** | Connects to the instance over SSH, installs Python 3.14, nginx and the app's dependencies (with uv), copies the app and starts it |
+| **Ansible** | Connects to the instance over SSH, installs Python 3.14 and nginx, makes a release from the app's build (with uv) and runs it |
 | **The app** | A guestbook, made with FastAPI and HTMX: visitors leave a message, with a picture if they like. Messages go to PostgreSQL, pictures to S3 |
 
 ```mermaid
@@ -57,8 +57,8 @@ choco install docker-desktop terraform git
 - **Internet,** for the Docker images, the Terraform providers and the packages Ansible
   installs on the instance.
 - Ansible itself needs no installing: it runs in a container.
-- Only for the app's tests: [uv](https://docs.astral.sh/uv/getting-started/installation/) and
-  Make (`choco install make`).
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/),** to build the app. Tried with 0.13.7.
+- Only for the app's tests and the `make` commands: Make (`choco install make`).
 
 ## 3. Step by step
 
@@ -88,19 +88,40 @@ The commands are the same in PowerShell and in Git Bash.
    cd ..
    ```
 
-4. **Deploy the app.** The first run builds the Ansible image and takes a few minutes.
+4. **Build the app.** The build is one wheel and `requirements.txt`, the locked dependencies
+   with their hashes, both in `app/dist/`.
+
+   ```powershell
+   cd app
+   uv build --wheel --out-dir dist
+   uv export --frozen --no-dev --no-emit-project --format requirements-txt --output-file dist/requirements.txt
+   cd ..
+   ```
+
+5. **Deploy the app.** Ansible makes a release from the build and runs it. The first run
+   builds the Ansible image and takes a few minutes.
 
    ```powershell
    docker compose run --rm ansible
    ```
 
    The run ends with `failed=0`. Among its lines it prints the instance's release, for example
-   `Amazon Linux release 2023.12.20260611 (Amazon Linux), Python 3.14.5`.
+   `Amazon Linux release 2023.12.20260611 (Amazon Linux), Python 3.14.5`, and its last line
+   names the release that runs, for example `Release 20261119T231500Z runs.`
 
-5. **Open the guestbook** at one of the URLs below.
+6. **Open the guestbook** at one of the URLs below.
 
-To deploy a change to the app, run step 4 again: Ansible copies what changed, removes what
-left the app, runs the database migrations and restarts gunicorn. Running it with nothing changed reports `changed=0`.
+To deploy a change to the app, run steps 4 and 5 again: Ansible makes a new release, runs the
+database migrations and restarts gunicorn on it. With the same build and the same config it
+makes none and reports `changed=0`.
+
+A release is a folder on the instance, `/opt/guestbook/releases/<UTC time>`, holding the
+build, its virtual environment and the config; `/opt/guestbook/current` points at the one
+that runs. The instance keeps the last five. To run the release before the current one:
+
+```powershell
+docker compose run --rm ansible -e rollback=true
+```
 
 ### The same, with Make
 
@@ -109,8 +130,9 @@ With Make installed (`choco install make`), the root `Makefile` wraps the usual 
 
 | Command | Does |
 |---|---|
-| `make all` | Steps 2 to 4, then prints the URLs |
-| `make up`, `make infra`, `make deploy` | Step 2, step 3, step 4 |
+| `make all` | Steps 2 to 5, then prints the URLs |
+| `make up`, `make infra`, `make build`, `make deploy` | Step 2, step 3, step 4, steps 4 and 5 |
+| `make rollback` | Runs the release before the current one |
 | `make urls`, `make status`, `make console` | The URLs, the running containers, the web console's URL |
 | `make smoke` | Checks the running stack: the guestbook answers on both URLs and Terraform has nothing to change |
 | `make idempotence` | Deploys, then runs the playbook again and fails unless that second run reports `changed=0` |
@@ -223,7 +245,7 @@ From `app/`, with uv and Make:
 make install             # the environment, from the committed uv.lock
 make test                # unit and acceptance (BDD) tests: nothing needs to be running
 make test-integration    # the PostgreSQL and S3 adapters, against the emulator (after step 3)
-make test-e2e            # a real browser against the deployed guestbook (after step 4)
+make test-e2e            # a real browser against the deployed guestbook (after step 5)
 make architecture        # the ports-and-adapters rules, on the imports
 make qa                  # lint, both type checkers, architecture, tests with coverage, security scans
 ```
@@ -256,9 +278,9 @@ signing is shared by all of them.
 
 ### The twelve factors
 
-The app meets ten of the twelve factors of [The Twelve-Factor App](https://12factor.net/).
-The two it does not fully meet come from the deployment, not from its code: build, release
-and run are not separate stages (V), and gunicorn runs as a daemon with a pid file (VIII).
+The app meets eleven of the twelve factors of [The Twelve-Factor App](https://12factor.net/).
+The one it does not fully meet comes from the deployment, not from its code: gunicorn runs
+as a daemon with a pid file (VIII).
 [docs/guestbook.md](docs/guestbook.md#3-the-twelve-factors) states the compliance factor by
 factor, and explains ports and adapters, SOLID and the architecture, with diagrams.
 
@@ -276,6 +298,9 @@ factor, and explains ports and adapters, SOLID and the architecture, with diagra
   ```
 
   The messages and pictures survive: they live in RDS and S3, not on the instance.
+- **Releases live on the instance.** A replaced instance starts with none, so there is
+  nothing to roll back to until the second deploy. A rollback does not undo the database's
+  migrations: the older release meets the newer tables.
 - **Floci keeps its state in memory.** Restarting its container, Docker Desktop or the laptop
   loses every emulated resource. Then destroy what is left and start again from step 2.
 - **Security groups and IAM policies are recorded, not enforced.** The role's policy is there

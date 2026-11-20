@@ -10,6 +10,8 @@ crash.log
 
 # Python: the virtual environment, caches and coverage reports
 .venv/
+# What "make build" makes: the wheel and the locked requirements
+dist/
 __pycache__/
 .pytest_cache/
 .hypothesis/

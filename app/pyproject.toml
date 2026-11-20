@@ -17,6 +17,19 @@ dependencies = [
     "uvicorn-worker==0.4.0",
 ]
 
+# "make build" turns the app into a wheel: the guestbook package with its templates, static
+# files and migrations, plus what gunicorn and Alembic are pointed at. Tests stay out.
+[build-system]
+requires = ["hatchling==1.33.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["guestbook"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"application.py" = "application.py"
+"alembic.ini" = "guestbook/alembic.ini"
+
 [dependency-groups]
 dev = [
     "httpx2",
