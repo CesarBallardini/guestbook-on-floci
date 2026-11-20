@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help all up infra build deploy rollback idempotence smoke replace-instance urls status console \
+.PHONY: help all up infra build deploy rollback rollback-check idempotence smoke replace-instance urls status console \
         install qa lint format test test-integration test-e2e destroy clean
 
 TERRAFORM := terraform -chdir=terraform
@@ -23,8 +23,11 @@ build: ## Build the app: its wheel and its locked dependencies, in app/dist/
 deploy: build ## Build, then make a release on the instance and run it (Ansible, from its container)
 	docker compose run --rm ansible
 
-rollback: ## Run the release before the current one (the database's migrations are not undone)
+rollback: ## Run the release before the current one, on the schema as it is (migrations are never undone)
 	docker compose run --rm ansible -e rollback=true
+
+rollback-check: deploy ## Deploy, then a build with one more migration, roll back across it and check; restores what it changed
+	sh ansible/check-rollback.sh
 
 idempotence: deploy ## Deploy, then run the playbook again and fail unless that second run changes nothing
 	docker compose run --rm --entrypoint sh ansible /work/ansible/check-idempotence.sh

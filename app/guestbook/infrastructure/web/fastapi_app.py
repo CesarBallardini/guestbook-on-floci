@@ -12,6 +12,7 @@ suits the blocking PostgreSQL and S3 clients behind the ports.
 
 import logging
 import socket
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -33,6 +34,7 @@ from guestbook.infrastructure.web.csrf import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, Callable, Sequence
     from datetime import datetime
 
     from guestbook.domain.input_ports import GetPicturePort, ListLatestMessagesPort, SignGuestbookPort
@@ -49,10 +51,28 @@ def create_fastapi_app(
     sign_guestbook_port: SignGuestbookPort,
     list_latest_messages_port: ListLatestMessagesPort,
     get_picture_port: GetPicturePort,
+    startup_checks: Sequence[Callable[[], None]] = (),
 ) -> FastAPI:
-    """Build the web application on top of the guestbook's three input ports."""
+    """Build the web application on top of the guestbook's three input ports.
+
+    Args:
+        sign_guestbook_port: Signs the guestbook.
+        list_latest_messages_port: Lists the latest messages.
+        get_picture_port: Gets a picture.
+        startup_checks: Run in order when the app starts, before it serves anything. One that
+            raises stops the start.
+    """
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+        # Run once per worker, when it starts: not when the app is put together, which
+        # connects to nothing.
+        for startup_check in startup_checks:
+            startup_check()
+        yield
+
     # A page for people, not an API for programs: no generated API documentation.
-    app = FastAPI(title='Guestbook', docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title='Guestbook', docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.mount('/static', StaticFiles(directory=_WEB_DIR / 'static'), name='static')
     templates = Jinja2Templates(directory=_WEB_DIR / 'templates')
     templates.env.filters['as_str'] = _datetime_utc_as_str

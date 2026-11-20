@@ -7,6 +7,7 @@ DATABASE_URL and PICTURE_BUCKET are required. S3_ENDPOINT_URL is for an emulator
 the pictures go to AWS. The S3 credentials come from the instance's role, as boto3 finds them.
 
 The database's tables are not made here: `alembic upgrade head` does it, before the app starts.
+When a worker starts, it checks that they are not behind this release (schema_version.py).
 
 What the app has to say goes to standard output, one event per line, from LOG_LEVEL up (INFO
 when not set). Where that ends up is for whoever starts the app to decide, not for the app.
@@ -15,8 +16,10 @@ when not set). Where that ends up is for whoever starts the app to decide, not f
 import logging
 import os
 import sys
+from functools import partial
 
 from guestbook.infrastructure.database.engine import create_database_engine, create_session_factory
+from guestbook.infrastructure.database.schema_version import check_schema_at_startup
 from guestbook.infrastructure.database.sqlalchemy_message_repository import SqlAlchemyMessageRepository
 from guestbook.infrastructure.s3_picture_storage_adapter import S3PictureStorageAdapter
 from guestbook.infrastructure.system_clock_adapter import SystemClockAdapter
@@ -33,13 +36,13 @@ logging.basicConfig(
     datefmt='%Y-%m-%dT%H:%M:%S%z',
 )
 
-message_repository = SqlAlchemyMessageRepository(
-    create_session_factory(create_database_engine(os.environ['DATABASE_URL']))
-)
+database_engine = create_database_engine(os.environ['DATABASE_URL'])
+message_repository = SqlAlchemyMessageRepository(create_session_factory(database_engine))
 picture_storage = S3PictureStorageAdapter(os.environ['PICTURE_BUCKET'], os.environ.get('S3_ENDPOINT_URL'))
 
 application = create_fastapi_app(
     SignGuestbookUseCase(message_repository, picture_storage, SystemClockAdapter(), Uuid7GeneratorAdapter()),
     ListLatestMessagesUseCase(message_repository),
     GetPictureUseCase(picture_storage),
+    startup_checks=[partial(check_schema_at_startup, database_engine)],
 )

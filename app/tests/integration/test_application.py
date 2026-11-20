@@ -2,6 +2,9 @@
 
 Importing it connects to nothing: the database engine and the S3 client open their connections
 at first use. So the wiring can be checked with addresses where nothing listens.
+
+Starting it (`with TestClient(...)`) checks the database's schema: those tests start it on a
+database of their own, or on none that can be reached.
 """
 
 import importlib
@@ -9,16 +12,20 @@ import sys
 from typing import TYPE_CHECKING
 
 import pytest
+from alembic import command
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect
 from sqlalchemy.orm import clear_mappers
 
 from guestbook.domain.message import Message
+from guestbook.infrastructure.database.schema_version import SchemaBehindError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from types import ModuleType
+
+    from alembic.config import Config
 
 pytestmark = pytest.mark.integration
 
@@ -70,3 +77,29 @@ def test_the_domain_class_is_mapped_while_the_app_is_put_together_and_plain_afte
     request.getfixturevalue('application_module')
 
     assert inspect(Message, raiseerr=False) is not None
+
+
+def test_the_app_does_not_start_on_a_database_its_migrations_have_not_reached(
+    application_module: ModuleType, monkeypatch: pytest.MonkeyPatch, database_url: str
+) -> None:
+    monkeypatch.setenv('DATABASE_URL', database_url)
+    importlib.reload(application_module)
+
+    with pytest.raises(SchemaBehindError), TestClient(application_module.application):
+        pass
+
+
+def test_the_app_starts_on_a_database_with_every_migration(
+    application_module: ModuleType, monkeypatch: pytest.MonkeyPatch, database_url: str, alembic_config: Config
+) -> None:
+    command.upgrade(alembic_config, 'head')
+    monkeypatch.setenv('DATABASE_URL', database_url)
+    importlib.reload(application_module)
+
+    with TestClient(application_module.application) as client:
+        assert client.get('/health').status_code == 200
+
+
+def test_the_app_starts_when_the_database_cannot_be_reached(application_module: ModuleType) -> None:
+    with TestClient(application_module.application) as client:
+        assert client.get('/health').status_code == 200

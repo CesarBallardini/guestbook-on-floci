@@ -4,7 +4,6 @@ Each test gets a new database, brought up to date by Alembic as a deploy does.
 """
 
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -15,7 +14,6 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from psycopg import sql
 from sqlalchemy import Engine, text
 
 from guestbook.domain.errors import StorageError
@@ -28,7 +26,6 @@ from guestbook.infrastructure.database.engine import (
 from guestbook.infrastructure.database.orm_mapping import metadata
 from guestbook.infrastructure.database.sqlalchemy_message_repository import SqlAlchemyMessageRepository
 from tests.contracts import MessageRepositoryContractMixin
-from tests.integration.conftest import APP_DIR, POSTGRES_URL
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -38,23 +35,6 @@ pytestmark = pytest.mark.integration
 POSTED_DATETIME_UTC = datetime(2026, 6, 11, 12, 0, 0, tzinfo=UTC)
 WRITERS = 8
 MESSAGES_PER_WRITER = 10
-
-
-@pytest.fixture
-def database_url() -> Iterator[str]:
-    database_name = f'guestbook_test_{uuid.uuid4().hex}'
-    with psycopg.connect(POSTGRES_URL, autocommit=True) as connection:
-        connection.execute(sql.SQL('create database {}').format(sql.Identifier(database_name)))
-    yield POSTGRES_URL.rsplit('/', 1)[0] + f'/{database_name}'
-    with psycopg.connect(POSTGRES_URL, autocommit=True) as connection:
-        connection.execute(sql.SQL('drop database {} with (force)').format(sql.Identifier(database_name)))
-
-
-@pytest.fixture
-def alembic_config(database_url: str) -> Config:
-    config = Config(APP_DIR / 'alembic.ini')
-    config.set_main_option('sqlalchemy.url', database_url)
-    return config
 
 
 @pytest.fixture

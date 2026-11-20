@@ -1,10 +1,18 @@
 """Unit tests for the web adapter, on the in-memory fakes."""
 
+from collections.abc import Callable
+
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from guestbook.domain.message import MAX_AUTHOR_LENGTH, MAX_BODY_LENGTH
 from guestbook.domain.picture import MAX_PICTURE_BYTES, MAX_PICTURE_MEGABYTES, PICTURE_FORMATS, accepted_format_names
+from guestbook.infrastructure.web.fastapi_app import create_fastapi_app
+from guestbook.use_cases.get_picture import GetPictureUseCase
+from guestbook.use_cases.list_latest_messages import ListLatestMessagesUseCase
+from guestbook.use_cases.sign_guestbook import SignGuestbookUseCase
+from tests.conftest import VISITOR_BASE_URL
 from tests.fakes import InMemoryMessageRepository, InMemoryPictureStorageAdapter
 
 pytestmark = pytest.mark.unit
@@ -246,3 +254,54 @@ def test_a_post_with_no_fields_is_refused_as_a_message_that_breaks_a_rule(client
 
     assert answer.status_code == 400
     assert 'needs a name' in answer.text
+
+
+class StartupRefusedError(Exception):
+    pass
+
+
+def _app_with_startup_checks(
+    sign_guestbook_use_case: SignGuestbookUseCase,
+    message_repository: InMemoryMessageRepository,
+    picture_storage: InMemoryPictureStorageAdapter,
+    startup_checks: list[Callable[[], None]],
+) -> FastAPI:
+    return create_fastapi_app(
+        sign_guestbook_use_case,
+        ListLatestMessagesUseCase(message_repository),
+        GetPictureUseCase(picture_storage),
+        startup_checks=startup_checks,
+    )
+
+
+def test_the_startup_checks_run_in_order_when_the_app_starts_and_not_before(
+    sign_guestbook_use_case: SignGuestbookUseCase,
+    message_repository: InMemoryMessageRepository,
+    picture_storage: InMemoryPictureStorageAdapter,
+) -> None:
+    checks_run: list[str] = []
+    app = _app_with_startup_checks(
+        sign_guestbook_use_case,
+        message_repository,
+        picture_storage,
+        [lambda: checks_run.append('first'), lambda: checks_run.append('second')],
+    )
+    assert checks_run == []
+
+    with TestClient(app, base_url=VISITOR_BASE_URL) as client:
+        assert checks_run == ['first', 'second']
+        assert client.get('/health').status_code == 200
+
+
+def test_a_startup_check_that_raises_stops_the_start(
+    sign_guestbook_use_case: SignGuestbookUseCase,
+    message_repository: InMemoryMessageRepository,
+    picture_storage: InMemoryPictureStorageAdapter,
+) -> None:
+    def refuse() -> None:
+        raise StartupRefusedError
+
+    app = _app_with_startup_checks(sign_guestbook_use_case, message_repository, picture_storage, [refuse])
+
+    with pytest.raises(StartupRefusedError), TestClient(app, base_url=VISITOR_BASE_URL):
+        pass

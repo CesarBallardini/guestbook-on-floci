@@ -1,5 +1,8 @@
 """${message}
 
+The releases before this one must still run on the schema it makes: a rollback leaves it in
+place (expand and contract, docs/guestbook.md).
+
 Revision ID: ${up_revision}
 Revises: ${down_revision | comma,n}
 """
