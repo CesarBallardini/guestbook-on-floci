@@ -392,7 +392,12 @@ The guestbook has no accounts: anybody may sign. These keep that from being abus
 | A flood of posts | One address may sign twice a second on average, 20 at once. Answer: 429. Reading is not limited | `ansible/templates/nginx.conf.j2`, `signing_rate` and `signing_burst` in the playbook |
 | Uploads that are too big | 2 MB for a picture (the app), 3 MB for a request (nginx). Answer: 400 or 413, same sentence | `guestbook/domain/picture.py`, `nginx.conf.j2` |
 | Files that are not pictures | The bytes decide the format, never the file's name or what the browser says | `guestbook/domain/picture.py` |
+| A picture opened on its own, as a page | It can run nothing and load nothing (`Content-Security-Policy: default-src 'none'; sandbox`), and no other site may embed it (`Cross-Origin-Resource-Policy`) | `guestbook/infrastructure/web/fastapi_app.py` |
 | A database or an S3 that does not answer | Time limits of 5 and 3 seconds to connect; the visitor reads that the guestbook is not available, and the cause goes to the log | `database/engine.py`, `s3_picture_storage_adapter.py` |
+
+Every rule a visitor's input must meet, every limit, and how fast a known vulnerability gets
+fixed, are in [docs/security.md](docs/security.md), each with the test that shows it.
+[docs/owasp.md](docs/owasp.md) states the guestbook's compliance with the OWASP ASVS 5.0.0.
 
 nginx knows a visitor's address because the load balancer passes it on, and believes it
 only from the addresses in `load_balancer_cidr` (`terraform/variables.tf`). In the emulator
@@ -504,7 +509,9 @@ volume Floci leaves behind.
 | `app/` | The guestbook, its tests and its tooling |
 | `docs/guestbook.md` | The app explained: ports and adapters, SOLID, the twelve factors, and its architecture in diagrams |
 | `docs/terraform.md` | A mini tutorial on Terraform, with this project as the example |
-| `docs/floci.md` | How to see what runs in the emulator: the console, its URLs, the AWS CLI |
+| `docs/floci.md` | How to see what runs in the emulator: the console, its URLs, the AWS CLI, and what Floci does with instances and networks |
+| `docs/security.md` | The rules the guestbook keeps: what a visitor may send, the limits, what pictures are served with, and how fast a vulnerability is fixed |
+| `docs/owasp.md` | Compliance with the OWASP ASVS 5.0.0, requirement by requirement |
 | `.generated/` | Written by Terraform: the SSH key and the inventory, for Ansible, and the VPN's profiles in `vpn/`. Ignored by Git |
 
 ## 10. References

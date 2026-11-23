@@ -142,8 +142,15 @@ def create_fastapi_app(
         return Response(
             stored.content,
             media_type=stored.content_type,
-            # A key never gets another picture, so the browser may keep it.
-            headers={'Cache-Control': 'private, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff'},
+            headers={
+                # A key never gets another picture, so the browser may keep it.
+                'Cache-Control': 'private, max-age=31536000, immutable',
+                'X-Content-Type-Options': 'nosniff',
+                # A visitor's file, opened as a page of its own, can run nothing and load
+                # nothing; and only this site may embed it. The page's <img> is unaffected.
+                'Content-Security-Policy': "default-src 'none'; sandbox",
+                'Cross-Origin-Resource-Policy': 'same-origin',
+            },
         )
 
     @app.get('/health')

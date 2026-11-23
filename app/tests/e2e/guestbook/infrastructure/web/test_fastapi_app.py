@@ -12,6 +12,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
 from typing import TYPE_CHECKING
+from urllib.parse import urljoin
 
 import httpx2 as httpx
 import pytest
@@ -62,12 +63,23 @@ def test_signing_with_a_picture_updates_the_page_without_loading_it_again(
     picture = newest.locator('img')
     expect(picture).to_be_visible()
     assert picture.evaluate('image => image.decode().then(() => image.naturalWidth)') == 1
+    # Opened on its own, through the load balancer and nginx, the same picture can run
+    # nothing and only this site may embed it (OWASP ASVS 3.2.1). The <img> above still draws.
+    picture_url = urljoin(GUESTBOOK_URL, picture.get_attribute('src') or '')
+    opened = page.request.get(picture_url)
+    assert opened.status == HTTPStatus.OK
+    assert opened.headers['content-security-policy'] == "default-src 'none'; sandbox"
+    assert opened.headers['cross-origin-resource-policy'] == 'same-origin'
     # HTMX swapped the list in place: the page was not loaded again, and the form was emptied.
     assert page.evaluate('window.loadedOnce') is True
     expect(page.get_by_placeholder('Your message')).to_have_value('')
 
     page.reload()
     expect(page.locator('#messages li .body').first).to_have_text(body)
+
+    # A visitor who opens the picture in a tab of its own still sees it, headers and all.
+    page.goto(picture_url)
+    assert page.locator('img').evaluate('image => image.decode().then(() => image.naturalWidth)') == 1
 
 
 def test_a_refused_message_shows_the_reason(page: Page, tmp_path: Path) -> None:
