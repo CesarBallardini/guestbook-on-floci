@@ -106,7 +106,7 @@ The commands are the same in PowerShell and in Git Bash.
    ```
 
    The run ends with `failed=0`. Among its lines it prints the instance's release, for example
-   `Amazon Linux release 2023.12.20260611 (Amazon Linux), Python 3.14.5`, and its last line
+   `Amazon Linux release 2023.12.20261120 (Amazon Linux), Python 3.14.10`, and its last line
    names the release that runs and the state of the database's schema, for example
    `Release 20261119T231500Z runs. The database's schema is up to date.`
 
@@ -324,9 +324,12 @@ factor, and explains ports and adapters, SOLID and the architecture, with diagra
   refuses a path without one, it must be `/#{path}` (`terraform/main.tf` says so too).
 - **Security groups and IAM policies are recorded, not enforced.** The role's policy is there
   to show the shape; the emulator would let the app do anything.
-- **The versions are pinned:** Floci 2.5.0 by digest, and Amazon Linux 2023 as of June 2026
-  (the first release with Python 3.14.5) in `floci/image-catalog.yaml`. The playbook stops if
-  the instance's Python is older than 3.14.5.
+- **The versions are pinned:** Floci 2.5.0 by digest, and Amazon Linux 2023 as of November
+  2026 (with Python 3.14.10) in `floci/image-catalog.yaml`. The playbook stops if the
+  instance's Python is older than 3.14.10, the first Python 3.14 that stops trusting the
+  compromised eMudhra certificates (the advisory of 2026-10-20). A unit test,
+  `app/tests/unit/test_certificate_floors.py`, keeps every pin at or above that advisory's
+  releases.
 
 ## 7. Safety notes
 

@@ -1,5 +1,6 @@
 # The Ansible control node: Ansible doesn't run on Windows, so it runs here.
-FROM python:3.13-slim
+# An exact release, at or above the one that stops trusting the compromised eMudhra certificates.
+FROM python:3.14.10-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssh-client \
     && rm -rf /var/lib/apt/lists/*

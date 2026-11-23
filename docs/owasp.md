@@ -786,7 +786,7 @@ Does not apply: no OAuth, no OIDC.
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 15.2.1 | 1 | Verify that the application only contains components which have not breached the documented update and remediation time frames. | 🟡 Partly | `pip-audit` in `make qa` finds nothing today; there is no time frame to breach, and nothing watches the rest |
+| 15.2.1 | 1 | Verify that the application only contains components which have not breached the documented update and remediation time frames. | 🟡 Partly | `pip-audit` in `make qa` finds nothing today; there is no time frame to breach. A unit test keeps Python, uv, certifi and pip at or above the eMudhra certificate advisory's releases; nothing watches the rest |
 | 15.2.2 | 2 | Verify that the application has implemented defenses against loss of availability due to functionality which is time-consuming or resource-demanding, based on the documented security decisions and strategies for this. | ✅ Yes | Size limits, the limit on signing, time limits to the database and S3 |
 | 15.2.3 | 2 | Verify that the production environment only includes functionality that is required for the application to function, and does not expose extraneous functionality such as test code, sample snippets, and development functionality. | ✅ Yes | No tests, no development dependency (the wheel and `uv export --no-dev`), no sample code on the instance |
 | 15.2.4 | 3 | Verify that third-party components and all of their transitive dependencies are included from the expected repository, whether internally owned or an external source, and that there is no risk of a dependency confusion attack. | ✅ Yes | `uv.lock` pins every package, with its hash, from PyPI only |

@@ -2,8 +2,9 @@
 name = "guestbook"
 version = "0.1.0"
 description = "A guestbook: one page that lists messages, with an optional picture, and takes a new one"
-# The floor is the Python 3.14 of the Amazon Linux 2023 release the instance runs.
-requires-python = ">=3.14.5"
+# The floor is the first Python 3.14 that stops trusting the compromised eMudhra certificates.
+# It is also the Python 3.14 of the Amazon Linux 2023 release the instance runs.
+requires-python = ">=3.14.10"
 dependencies = [
     "alembic==1.20.1",
     "boto3==1.43.124",
