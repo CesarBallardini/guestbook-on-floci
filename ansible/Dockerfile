@@ -6,7 +6,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends openssh-client openvpn iproute2 \
     && rm -rf /var/lib/apt/lists/*
 # ansible-lint checks the playbook ("make lint"); it runs here for the same reason.
-RUN pip install --no-cache-dir ansible-core==2.21.6 ansible-lint==26.10.1
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY run-playbook.sh /usr/local/bin/run-playbook.sh
 # Named here because Ansible ignores an ansible.cfg it finds in a world-writable folder, which

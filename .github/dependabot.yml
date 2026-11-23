@@ -1,0 +1,54 @@
+# Pull requests that move a pinned component to its latest release, weekly. Their titles
+# must pass .github/workflows/pull-request-title.yml, hence each prefix: "build(deps): bump
+# ..." for what the guestbook is built and deployed with, "ci(deps): bump ..." for Actions.
+# Not watched here, and updated by hand every quarter (docs/security.md, section 4): Floci
+# and its console (compose.yaml, by digest), the Amazon Linux image
+# (floci/image-catalog.yaml), the uv of the playbook and of CI, and HTMX.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /app
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+    # One pull request for every minor and patch release of the week; a major one alone.
+    groups:
+      python:
+        update-types: [minor, patch]
+
+  # The control node's Ansible and ansible-lint (ansible/requirements.txt).
+  - package-ecosystem: pip
+    directory: /ansible
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+
+  # The control node's base image (ansible/Dockerfile).
+  - package-ecosystem: docker
+    directory: /ansible
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+
+  # The providers in terraform/.terraform.lock.hcl.
+  - package-ecosystem: terraform
+    directory: /terraform
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope

@@ -69,17 +69,25 @@ would have fixed it says why, and when it will be looked at again.
 quarter, even with no advisory against it. For the Python packages that is
 `uv lock --upgrade` in `app/`, then the full check.
 
-**The components, and what tells us about them:**
+**The components, and what tells us about them.** Dependabot (`.github/dependabot.yml`)
+opens a pull request each week for every component it can read, and CI
+(`.github/workflows/ci.yml`) runs `make qa` on every pull request, on `main`, and every
+Monday, so `pip-audit` sees advisories published since the last change. The rest is
+updated by hand, every quarter.
 
 | Component | Pinned in | Watched by |
 |---|---|---|
-| The app's Python packages | `app/uv.lock`, with hashes | `pip-audit` in `make qa` (`make -C app security`) |
-| Python, uv, certifi and pip | `app/.python-version`, `app/pyproject.toml`, `ansible/Dockerfile`, `ansible/playbook.yml`, `app/uv.lock` | `app/tests/unit/test_certificate_floors.py` keeps them at or above the eMudhra advisory's releases |
-| Amazon Linux 2023, its Python, nginx, OpenVPN | `floci/image-catalog.yaml` (an image by digest) | Nothing yet |
-| Floci and its console, the Ansible image's base | `compose.yaml`, `ansible/Dockerfile`, by digest or exact version | Nothing yet |
-| Ansible and ansible-lint | `ansible/Dockerfile` | Nothing yet |
-| Terraform's providers | `terraform/.terraform.lock.hcl` | Nothing yet |
-| HTMX | A vendored copy in `infrastructure/web/static/` | Nothing yet |
+| The app's Python packages | `app/uv.lock`, with hashes | Dependabot (`uv`); `pip-audit` in `make qa`, on every pull request and weekly |
+| Python, uv, certifi and pip | `app/.python-version`, `app/pyproject.toml`, `ansible/Dockerfile`, `ansible/playbook.yml`, `.github/workflows/ci.yml`, `app/uv.lock` | `app/tests/unit/test_certificate_floors.py` keeps them at or above the eMudhra advisory's releases |
+| Ansible and ansible-lint | `ansible/requirements.txt` | Dependabot (`pip`) |
+| The Ansible image's base | `ansible/Dockerfile` | Dependabot (`docker`) |
+| Terraform's providers | `terraform/.terraform.lock.hcl` | Dependabot (`terraform`) |
+| The Actions CI uses | `.github/workflows/`, by commit | Dependabot (`github-actions`) |
+| Amazon Linux 2023, and the nginx, OpenSSL, Python and OpenVPN it brings | `floci/image-catalog.yaml` (an image by digest) | Nothing: by hand, every quarter |
+| Floci and its console | `compose.yaml`, by digest | Nothing: by hand, every quarter. They run on the laptop only |
+| uv, Terraform and tflint in CI | `.github/workflows/ci.yml` | Nothing: by hand, every quarter |
+| HTMX | A vendored copy in `infrastructure/web/static/` | Nothing: by hand, every quarter |
 
-"Nothing yet" ends with the CI that is planned: Dependabot for the Python packages, the
-Actions and the Docker images, and a weekly `pip-audit`.
+Nothing tells us of an advisory against the instance's operating system packages within
+the 7 days a critical one allows. On AWS that is Amazon Inspector's job, or
+`dnf updateinfo list --security` on the instance.

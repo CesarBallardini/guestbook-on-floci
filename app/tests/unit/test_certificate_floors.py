@@ -52,6 +52,7 @@ def test_the_lockfile_stays_at_or_above_the_floor(package: str, floor: str) -> N
         ('ansible/Dockerfile', rf'^FROM python:{DOTTED_VERSION}-slim\b', PYTHON_FLOOR),
         ('ansible/playbook.yml', rf'^ +minimum_python_version: "{DOTTED_VERSION}"$', PYTHON_FLOOR),
         ('ansible/playbook.yml', rf'^ +uv_version: "{DOTTED_VERSION}"$', '0.13.6'),
+        ('.github/workflows/ci.yml', rf'^  UV_VERSION: "{DOTTED_VERSION}"$', '0.13.6'),
     ],
 )
 def test_every_pin_stays_at_or_above_the_floor(relative_path: str, pattern: str, floor: str) -> None:
