@@ -374,6 +374,13 @@ make qa                  # lint, both type checkers, architecture, tests with co
 
 `make test-e2e` needs a browser for Playwright, once: `uv run --frozen playwright install chromium`.
 
+GitHub runs the checks that need no emulator (`.github/workflows/ci.yml`): `make -C app qa`
+and the build tests, then `make lint` (Terraform, the network's rules, ansible-lint). They
+run on every pull request, on `main`, and every Monday, for new advisories. A second
+workflow checks that a pull request's title follows Conventional Commits, and Dependabot
+(`.github/dependabot.yml`) proposes updates each week, with titles that pass it. The
+integration and end-to-end tests run on the laptop only.
+
 | Kind | Where | What it checks | Needs |
 |---|---|---|---|
 | Unit | `tests/unit/` | The rules (by example and by property, with Hypothesis), the use cases, the web adapter (the token against forged posts included), the clock and identifier adapters, the fakes, and that `alembic.ini` finds the migrations by package | Nothing |
@@ -505,7 +512,8 @@ volume Floci leaves behind.
 | `compose.yaml` | Floci and the Ansible control node |
 | `floci/image-catalog.yaml` | Which Docker image stands for the instance's AMI |
 | `terraform/` | The infrastructure. `main.tf` is the place to start reading; `network.tf`, `security-groups.tf` and `vpn.tf` are the network and the way in. `tests/` checks the network's rules |
-| `ansible/` | The control node's image, the playbook, its templates and its files |
+| `ansible/` | The control node's image (and its Python packages, `requirements.txt`), the playbook, its templates and its files |
+| `.github/` | CI (`workflows/ci.yml`), the pull-request title check, and Dependabot |
 | `app/` | The guestbook, its tests and its tooling |
 | `docs/guestbook.md` | The app explained: ports and adapters, SOLID, the twelve factors, and its architecture in diagrams |
 | `docs/terraform.md` | A mini tutorial on Terraform, with this project as the example |
