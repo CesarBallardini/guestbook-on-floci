@@ -102,6 +102,25 @@ def test_a_picture_is_stored_and_served_back(
     assert served.headers['X-Content-Type-Options'] == 'nosniff'
 
 
+def test_a_picture_opened_on_its_own_can_run_nothing_and_load_nothing(
+    client: TestClient, picture_storage: InMemoryPictureStorageAdapter, png_bytes: bytes
+) -> None:
+    # A visitor's file, opened as a page of its own (OWASP ASVS 3.2.1): no script, no
+    # plugin, no form, nothing loaded from elsewhere, and no other site may embed it.
+    client.post(
+        '/messages',
+        data={'author': 'Ada', 'body': 'Look'},
+        files={'picture': ('holiday.png', png_bytes)},
+        headers=HTMX,
+    )
+    (key,) = picture_storage.pictures
+
+    served = client.get(f'/pictures/{key}')
+
+    assert served.headers['Content-Security-Policy'] == "default-src 'none'; sandbox"
+    assert served.headers['Cross-Origin-Resource-Policy'] == 'same-origin'
+
+
 def test_a_form_sent_with_no_file_chosen_is_a_message_without_picture(
     client: TestClient, message_repository: InMemoryMessageRepository
 ) -> None:

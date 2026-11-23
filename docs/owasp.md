@@ -58,25 +58,25 @@ Three things to keep in mind:
 ## 3. Summary
 
 Of the 345 requirements, 190 are about something the guestbook does not have. Of the
-155 that apply, it complies with 70, in part with 23, and not with 55;
+155 that apply, it complies with 74, in part with 20, and not with 54;
 7 are not checked.
 
 By level:
 
 | Level | Requirements | Yes | Partly | No | Not checked | n/a |
 |---|---|---|---|---|---|---|
-| 1 | 70 | 24 | 4 | 2 | 0 | 40 |
-| 2 | 183 | 34 | 17 | 27 | 1 | 104 |
+| 1 | 70 | 27 | 2 | 1 | 0 | 40 |
+| 2 | 183 | 35 | 16 | 27 | 1 | 104 |
 | 3 | 92 | 12 | 2 | 26 | 6 | 46 |
-| All | 345 | 70 | 23 | 55 | 7 | 190 |
+| All | 345 | 74 | 20 | 54 | 7 | 190 |
 
 By chapter:
 
 | Chapter | Requirements | Yes | Partly | No | Not checked | n/a |
 |---|---|---|---|---|---|---|
 | [V1 Encoding and Sanitization](#v1-encoding-and-sanitization) | 30 | 12 | 0 | 0 | 0 | 18 |
-| [V2 Validation and Business Logic](#v2-validation-and-business-logic) | 13 | 4 | 3 | 1 | 0 | 5 |
-| [V3 Web Frontend Security](#v3-web-frontend-security) | 31 | 13 | 3 | 9 | 1 | 5 |
+| [V2 Validation and Business Logic](#v2-validation-and-business-logic) | 13 | 6 | 1 | 1 | 0 | 5 |
+| [V3 Web Frontend Security](#v3-web-frontend-security) | 31 | 14 | 2 | 9 | 1 | 5 |
 | [V4 API and Web Service](#v4-api-and-web-service) | 16 | 6 | 0 | 0 | 3 | 7 |
 | [V5 File Handling](#v5-file-handling) | 13 | 4 | 1 | 5 | 0 | 3 |
 | [V6 Authentication](#v6-authentication) | 47 | 0 | 0 | 0 | 0 | 47 |
@@ -88,11 +88,12 @@ By chapter:
 | [V12 Secure Communication](#v12-secure-communication) | 12 | 1 | 2 | 8 | 0 | 1 |
 | [V13 Configuration](#v13-configuration) | 21 | 4 | 6 | 10 | 0 | 1 |
 | [V14 Data Protection](#v14-data-protection) | 13 | 6 | 0 | 6 | 0 | 1 |
-| [V15 Secure Coding and Architecture](#v15-secure-coding-and-architecture) | 21 | 7 | 3 | 5 | 3 | 3 |
+| [V15 Secure Coding and Architecture](#v15-secure-coding-and-architecture) | 21 | 8 | 3 | 4 | 3 | 3 |
 | [V16 Security Logging and Error Handling](#v16-security-logging-and-error-handling) | 17 | 5 | 4 | 6 | 0 | 2 |
 | [V17 WebRTC](#v17-webrtc) | 12 | 0 | 0 | 0 | 0 | 12 |
 
-The Level 1 requirements that are open: 2.1.1, 3.2.1, 12.1.1, 12.2.2, 15.1.1, 15.2.1.
+The Level 1 requirements that are open: 12.1.1, 12.2.2, 15.2.1. The first two can only
+be closed on AWS.
 
 ## 4. Every requirement
 
@@ -161,9 +162,9 @@ The "Requirement" column is the text of the standard, word for word.
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 2.1.1 | 1 | Verify that the application's documentation defines input validation rules for how to check the validity of data items against an expected structure. This could be common data formats such as credit card numbers, email addresses, telephone numbers, or it could be an internal data format. | 🟡 Partly | The rules are in `docs/guestbook.md` and the README, not gathered as a security document |
+| 2.1.1 | 1 | Verify that the application's documentation defines input validation rules for how to check the validity of data items against an expected structure. This could be common data formats such as credit card numbers, email addresses, telephone numbers, or it could be an internal data format. | ✅ Yes | `docs/security.md`, section 1: each item a visitor sends, the rule it must meet, the file that enforces it and the test that shows it |
 | 2.1.2 | 2 | Verify that the application's documentation defines how to validate the logical and contextual consistency of combined data items, such as checking that suburb and ZIP code match. | ➖ n/a | No two fields depend on each other |
-| 2.1.3 | 2 | Verify that expectations for business logic limits and validations are documented, including both per-user and globally across the application. | 🟡 Partly | The limits (lengths, 2 MB, 2 posts a second) are documented in several places, not in one |
+| 2.1.3 | 2 | Verify that expectations for business logic limits and validations are documented, including both per-user and globally across the application. | ✅ Yes | `docs/security.md`, section 2: per address (2 posts a second, 20 at once) and for everybody (no limit beyond that, and none on what is kept) |
 
 #### V2.2 Input Validation
 
@@ -202,7 +203,7 @@ The "Requirement" column is the text of the standard, word for word.
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 3.2.1 | 1 | Verify that security controls are in place to prevent browsers from rendering content or functionality in HTTP responses in an incorrect context (e.g., when an API, a user-uploaded file or other resource is requested directly). Possible controls could include: not serving the content unless HTTP request header fields (such as Sec-Fetch-\*) indicate it is the correct context, using the sandbox directive of the Content-Security-Policy header field or using the attachment disposition type in the Content-Disposition header field. | 🟡 Partly | Pictures are served with their image type and `nosniff`, without a sandboxing policy or `Cross-Origin-Resource-Policy` |
+| 3.2.1 | 1 | Verify that security controls are in place to prevent browsers from rendering content or functionality in HTTP responses in an incorrect context (e.g., when an API, a user-uploaded file or other resource is requested directly). Possible controls could include: not serving the content unless HTTP request header fields (such as Sec-Fetch-\*) indicate it is the correct context, using the sandbox directive of the Content-Security-Policy header field or using the attachment disposition type in the Content-Disposition header field. | ✅ Yes | A picture opened on its own comes with its image type, `nosniff`, `Content-Security-Policy: default-src 'none'; sandbox` and `Cross-Origin-Resource-Policy: same-origin`. Unit and e2e tests check the headers through nginx, and that the picture is still drawn |
 | 3.2.2 | 1 | Verify that content intended to be displayed as text, rather than rendered as HTML, is handled using safe rendering functions (such as createTextNode or textContent) to prevent unintended execution of content such as HTML or JavaScript. | ✅ Yes | The page writes error texts with `textContent` |
 | 3.2.3 | 3 | Verify that the application avoids DOM clobbering when using client-side JavaScript by employing explicit variable declarations, performing strict type checking, avoiding storing global variables on the document object, and implementing namespace isolation. | ❔ Not checked | The page's script is HTMX and two inline handlers; not reviewed for this |
 
@@ -777,8 +778,8 @@ Does not apply: no OAuth, no OIDC.
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 15.1.1 | 1 | Verify that application documentation defines risk based remediation time frames for 3rd party component versions with vulnerabilities and for updating libraries in general, to minimize the risk from these components. | ❌ No | No written time frames |
-| 15.1.2 | 2 | Verify that an inventory catalog, such as software bill of materials (SBOM), is maintained of all third-party libraries in use, including verifying that components come from pre-defined, trusted, and continually maintained repositories. | 🟡 Partly | `uv.lock` lists the Python packages with hashes. nginx, the operating system, HTMX and the images are in no inventory |
+| 15.1.1 | 1 | Verify that application documentation defines risk based remediation time frames for 3rd party component versions with vulnerabilities and for updating libraries in general, to minimize the risk from these components. | ✅ Yes | `docs/security.md`, section 4: by CVSS, 7 days if critical, 30 if high, 90 otherwise; every component brought up to date at least every quarter |
+| 15.1.2 | 2 | Verify that an inventory catalog, such as software bill of materials (SBOM), is maintained of all third-party libraries in use, including verifying that components come from pre-defined, trusted, and continually maintained repositories. | 🟡 Partly | `uv.lock` lists the Python packages with hashes, and `docs/security.md` section 4 lists the other components and where each is pinned. The libraries inside nginx, the operating system and the images are in no inventory |
 | 15.1.3 | 2 | Verify that the application documentation identifies functionality which is time-consuming or resource-demanding. This must include how to prevent a loss of availability due to overusing this functionality and how to avoid a situation where building a response takes longer than the consumer's timeout. Potential defenses may include asynchronous processing, using queues, and limiting parallel processes per user and per application. | ❌ No | Not written |
 | 15.1.4 | 3 | Verify that application documentation highlights third-party libraries which are considered to be "risky components". | ❌ No | Not written |
 | 15.1.5 | 3 | Verify that application documentation highlights parts of the application where "dangerous functionality" is being used. | ❌ No | Not written |
@@ -787,7 +788,7 @@ Does not apply: no OAuth, no OIDC.
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 15.2.1 | 1 | Verify that the application only contains components which have not breached the documented update and remediation time frames. | 🟡 Partly | `pip-audit` in `make qa` finds nothing today; there is no time frame to breach. A unit test keeps Python, uv, certifi and pip at or above the eMudhra certificate advisory's releases; nothing watches the rest |
+| 15.2.1 | 1 | Verify that the application only contains components which have not breached the documented update and remediation time frames. | 🟡 Partly | The time frames are written (`docs/security.md`, section 4), and nothing is past them today: `pip-audit` in `make qa` finds nothing, and a unit test keeps Python, uv, certifi and pip at or above the eMudhra advisory's releases. Nothing watches the other components yet |
 | 15.2.2 | 2 | Verify that the application has implemented defenses against loss of availability due to functionality which is time-consuming or resource-demanding, based on the documented security decisions and strategies for this. | ✅ Yes | Size limits, the limit on signing, time limits to the database and S3 |
 | 15.2.3 | 2 | Verify that the production environment only includes functionality that is required for the application to function, and does not expose extraneous functionality such as test code, sample snippets, and development functionality. | ✅ Yes | No tests, no development dependency (the wheel and `uv export --no-dev`), no sample code on the instance |
 | 15.2.4 | 3 | Verify that third-party components and all of their transitive dependencies are included from the expected repository, whether internally owned or an external source, and that there is no risk of a dependency confusion attack. | ✅ Yes | `uv.lock` pins every package, with its hash, from PyPI only |
