@@ -323,7 +323,8 @@ factor, and explains ports and adapters, SOLID and the architecture, with diagra
   `#{path}`, because Floci keeps the leading `/` in it. On AWS, which removes that slash and
   refuses a path without one, it must be `/#{path}` (`terraform/main.tf` says so too).
 - **Security groups and IAM policies are recorded, not enforced.** The role's policy is there
-  to show the shape; the emulator would let the app do anything.
+  to show the shape; the emulator would let the app do anything. Subnets, routes and gateways
+  are recorded the same way (`docs/floci.md`, section 5).
 - **The versions are pinned:** Floci 2.5.0 by digest, and Amazon Linux 2023 as of November
   2026 (with Python 3.14.10) in `floci/image-catalog.yaml`. The playbook stops if the
   instance's Python is older than 3.14.10, the first Python 3.14 that stops trusting the

@@ -144,3 +144,50 @@ docker exec floci-aws-ec2-<instance id> supervisorctl status                 # g
 docker exec floci-aws-ec2-<instance id> tail /var/log/guestbook.log          # the app's output
 docker exec floci-aws-ec2-<instance id> readlink /opt/guestbook/current      # the release that runs
 ```
+
+## 5. What Floci 2.5.0 does with instances and networks
+
+Checked on 2026-11-22 with this project's settings (`compose.yaml`).
+
+**A network is recorded, not built.** Floci accepts a VPC of one's own, subnets in two zones,
+an internet gateway, Elastic IPs, a NAT gateway, route tables and their routes, an S3 gateway
+endpoint, a DB subnet group, and security-group rules that name another group or open a UDP
+port. A load balancer in such subnets, with a security group, works: its target is
+`healthy` and its listener answers. None of it changes where traffic goes:
+
+| What | On AWS | In Floci |
+|---|---|---|
+| An instance's private address | From its subnet's CIDR | From the Docker network `guestbook-on-floci`, whatever the subnet says |
+| Its public address | An Elastic IP or none | `127.0.0.1` when one is asked for |
+| Its way out to the internet | Only through an internet or NAT gateway | Always: its container is also on Docker's default `bridge` network |
+| Security groups | Enforced | Recorded only |
+| RDS with `publicly_accessible = false` | Reachable from inside the VPC only | Still `aws-emulator`, from every container on the network; a second RDS instance gets port 7002 |
+
+**Ports on the laptop.** Each instance's SSH port is published on every network interface,
+one port per instance from 2200 (2200, 2201, ...). Nothing else is published for an
+instance: with `FLOCI_SERVICES_EC2_PUBLISH_SECURITY_GROUP_PORTS` set to `true`, rules for
+TCP and UDP ports open to `0.0.0.0/0` still published none. So a program outside the Docker
+network can reach an instance only by SSH.
+
+**A pinned subnet works.** With `ipam` and a subnet set for `guestbook-on-floci` in
+`compose.yaml` (tried with `172.30.0.0/24`), Floci, RDS and the instances come up in it, and
+the addresses are predictable.
+
+**How a new instance is set up.** Floci starts the container, then installs with dnf what it
+needs: the metadata service's proxy (it waits up to 180 seconds) and openssh-server (up to
+120 seconds). Then it injects the SSH key, starts sshd, and runs the instance's `user_data`.
+
+- **On a slow network the downloads time out, and Floci does not retry.** The instance is
+  `running` but has no sshd, and Ansible gets "Connection refused" on port 22. Two instances
+  started at once timed out both. The answer is a new instance:
+  `terraform apply -replace=aws_instance.app`, then deploy again.
+- **`user_data` runs, after Floci's own setup.** But a download that timed out may still be
+  running: a `dnf` in `user_data` then waits for it and can fail on the shared package cache.
+  A `user_data` script that installs packages should try again.
+- **The image has no `sysctl`, `ps` or `pkill`.** A script writes to `/proc/sys/...` and reads
+  `/proc` instead. The container is privileged and has `/dev/net/tun`.
+
+**One Floci per Docker daemon.** A second Floci started on the same laptop removed this
+stack's instance container the second it started. The first Floci went on reporting the
+instance `running`, and the load balancer answered 502. Before starting another Floci, stop
+this stack (`make destroy`). To recover, replace the instance as above.
