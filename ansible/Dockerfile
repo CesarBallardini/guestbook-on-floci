@@ -1,6 +1,6 @@
 # The Ansible control node: Ansible doesn't run on Windows, so it runs here.
 # An exact release, at or above the one that stops trusting the compromised eMudhra certificates.
-FROM python:3.14.10-slim
+FROM python:3.15.2-slim
 # OpenVPN and iproute2: the playbook reaches the instances through the VPN (run-playbook.sh).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssh-client openvpn iproute2 \
