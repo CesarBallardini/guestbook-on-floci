@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help all up infra build deploy rollback rollback-check idempotence smoke replace-instance urls status console \
+.PHONY: help all up infra build deploy rollback rollback-check idempotence smoke replace-instance replace-vpn urls status console \
         install qa lint format test test-integration test-e2e destroy clean
 
 TERRAFORM := terraform -chdir=terraform
@@ -21,16 +21,16 @@ build: ## Build the app: its wheel and its locked dependencies, in app/dist/
 	$(MAKE) -C app build
 
 deploy: build ## Build, then make a release on the instance and run it (Ansible, from its container)
-	docker compose run --rm ansible
+	docker compose run --rm --build ansible
 
 rollback: ## Run the release before the current one, on the schema as it is (migrations are never undone)
-	docker compose run --rm ansible -e rollback=true
+	docker compose run --rm --build ansible -e rollback=true
 
 rollback-check: deploy ## Deploy, then a build with one more migration, roll back across it and check; restores what it changed
 	sh ansible/check-rollback.sh
 
 idempotence: deploy ## Deploy, then run the playbook again and fail unless that second run changes nothing
-	docker compose run --rm --entrypoint sh ansible /work/ansible/check-idempotence.sh
+	docker compose run --rm --build --entrypoint sh ansible /work/ansible/check-idempotence.sh
 
 smoke: ## Check the running stack: HTTPS answers, HTTP redirects to it, and Terraform has nothing to change
 	curl --fail --silent --show-error --insecure --location --max-redirs 1 --proto-redir =https http://localhost:8080/health
@@ -39,6 +39,10 @@ smoke: ## Check the running stack: HTTPS answers, HTTP redirects to it, and Terr
 
 replace-instance: ## Make the EC2 instance again and deploy to it (messages and pictures survive)
 	$(TERRAFORM) apply -replace=aws_instance.app
+	$(MAKE) deploy
+
+replace-vpn: ## Make the VPN server again (it sets itself up at first boot), then deploy through it
+	$(TERRAFORM) apply -replace=aws_instance.vpn
 	$(MAKE) deploy
 
 urls: ## Print the guestbook's URLs, the instance and the database
@@ -56,11 +60,12 @@ install: ## Sync the app's environment from the committed lockfile
 qa: lint ## Run every quality gate: Terraform and Ansible checks, then the app's (lint, types, architecture, coverage, security)
 	$(MAKE) -C app qa
 
-lint: ## Check the Terraform files and the playbook without modifying them (fmt, validate, tflint, ansible-lint)
-	$(TERRAFORM) fmt -check
+lint: ## Check the Terraform files and the playbook without modifying them (fmt, validate, tflint, the network's rules, ansible-lint)
+	$(TERRAFORM) fmt -check -recursive
 	$(TERRAFORM) validate
 	cd terraform && tflint
-	docker compose run --rm --entrypoint ansible-lint ansible
+	$(TERRAFORM) test
+	docker compose run --rm --build --entrypoint ansible-lint ansible
 
 format: ## Auto-fix the formatting of the Terraform files and of the app
 	$(TERRAFORM) fmt

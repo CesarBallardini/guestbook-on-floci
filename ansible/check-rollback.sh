@@ -39,7 +39,7 @@ EOF
 
 # The playbook's output goes to the log file, then to the screen: a pipe would hide its status.
 run_in_ansible_container() {
-    if docker compose run --rm "$@" > "$log_file" 2>&1; then
+    if docker compose run --rm --build "$@" > "$log_file" 2>&1; then
         cat "$log_file"
     else
         cat "$log_file"
@@ -136,8 +136,10 @@ EOF
 run_in_ansible_container ansible -e rollback=true
 said | grep -q 'is ahead of it' || fail "After the rollback, the playbook did not say the schema is ahead."
 [ "$(said | awk '{ print $2 }')" != "$b_release_run" ] || fail "The rollback still runs B."
+# The shell, not curl, discards the page: with no path conversion, Git Bash's curl is handed
+# "/dev/null" as is, and on Windows it can't write there.
 for path in health ''; do
-    curl --fail --silent --show-error --insecure --output /dev/null "https://localhost:8443/$path"
+    curl --fail --silent --show-error --insecure "https://localhost:8443/$path" > /dev/null
 done
 on_instance "$app_log_lines" <<'EOF' || fail "Release A did not log that the schema is ahead of it."
 tail -n "+$(($1 + 1))" /var/log/guestbook.log | grep -q "The database's schema is ahead of this release"

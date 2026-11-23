@@ -1,0 +1,12 @@
+# For supervisord, the one daemon on each instance. A stopped daemon stays in the process table
+# as a zombie: the instance's first process is not an init and never collects it. So "is it
+# running" asks for a process that isn't one.
+- name: Install the check for a running daemon
+  ansible.builtin.copy:
+    dest: /usr/local/bin/pid-file-alive
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      # pid-file-alive <pid file>: succeeds when the file names a process that still runs.
+      pid="$(cat "$1" 2>/dev/null)" && [ -n "$pid" ] && [ -r "/proc/$pid/status" ] &&
+        ! grep -q '^State:[[:space:]]*Z' "/proc/$pid/status"

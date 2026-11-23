@@ -31,7 +31,8 @@ then checked against. That is why several rows below say "not written".
 
 The standard covers the application and what serves, changes or checks its HTTP traffic.
 Here that is the app, gunicorn, nginx, the load balancer, and what Terraform and Ansible
-configure around them: the security group, the role, the database and the bucket.
+configure around them: the network and its security groups, the roles, the VPN, the database
+and the bucket.
 
 ## 2. How to read the tables
 
@@ -57,7 +58,7 @@ Three things to keep in mind:
 ## 3. Summary
 
 Of the 345 requirements, 190 are about something the guestbook does not have. Of the
-155 that apply, it complies with 70, in part with 21, and not with 57;
+155 that apply, it complies with 70, in part with 23, and not with 55;
 7 are not checked.
 
 By level:
@@ -65,9 +66,9 @@ By level:
 | Level | Requirements | Yes | Partly | No | Not checked | n/a |
 |---|---|---|---|---|---|---|
 | 1 | 70 | 24 | 4 | 2 | 0 | 40 |
-| 2 | 183 | 34 | 15 | 29 | 1 | 104 |
+| 2 | 183 | 34 | 17 | 27 | 1 | 104 |
 | 3 | 92 | 12 | 2 | 26 | 6 | 46 |
-| All | 345 | 70 | 21 | 57 | 7 | 190 |
+| All | 345 | 70 | 23 | 55 | 7 | 190 |
 
 By chapter:
 
@@ -85,7 +86,7 @@ By chapter:
 | [V10 OAuth and OIDC](#v10-oauth-and-oidc) | 36 | 0 | 0 | 0 | 0 | 36 |
 | [V11 Cryptography](#v11-cryptography) | 24 | 8 | 1 | 5 | 0 | 10 |
 | [V12 Secure Communication](#v12-secure-communication) | 12 | 1 | 2 | 8 | 0 | 1 |
-| [V13 Configuration](#v13-configuration) | 21 | 4 | 4 | 12 | 0 | 1 |
+| [V13 Configuration](#v13-configuration) | 21 | 4 | 6 | 10 | 0 | 1 |
 | [V14 Data Protection](#v14-data-protection) | 13 | 6 | 0 | 6 | 0 | 1 |
 | [V15 Secure Coding and Architecture](#v15-secure-coding-and-architecture) | 21 | 7 | 3 | 5 | 3 | 3 |
 | [V16 Security Logging and Error Handling](#v16-security-logging-and-error-handling) | 17 | 5 | 4 | 6 | 0 | 2 |
@@ -624,7 +625,7 @@ Does not apply: no OAuth, no OIDC.
 |---|---|---|---|---|
 | 11.2.1 | 2 | Verify that industry-validated implementations (including libraries and hardware-accelerated implementations) are used for cryptographic operations. | ✅ Yes | Python's `secrets` and `hmac`, OpenSSL, and AWS for TLS |
 | 11.2.2 | 2 | Verify that the application is designed with crypto agility such that random number, authenticated encryption, MAC, or hashing algorithms, key lengths, rounds, ciphers and modes can be reconfigured, upgraded, or swapped at any time, to protect against cryptographic breaks. Similarly, it must also be possible to replace keys and passwords and re-encrypt data. This will allow for seamless upgrades to post-quantum cryptography (PQC), once high-assurance implementations of approved PQC schemes or standards are widely available. | ✅ Yes | The TLS policy is one Terraform setting and the token is one function |
-| 11.2.3 | 2 | Verify that all cryptographic primitives utilize a minimum of 128-bits of security based on the algorithm, key size, and configuration. For example, a 256-bit ECC key provides roughly 128 bits of security where RSA requires a 3072-bit key to achieve 128 bits of security. | ✅ Yes | The token has 256 random bits; the SSH key is ED25519 |
+| 11.2.3 | 2 | Verify that all cryptographic primitives utilize a minimum of 128-bits of security based on the algorithm, key size, and configuration. For example, a 256-bit ECC key provides roughly 128 bits of security where RSA requires a 3072-bit key to achieve 128 bits of security. | ✅ Yes | The token has 256 random bits; the SSH key is ED25519; the VPN's keys are ECDSA P-256, and its `tls-crypt` key is 2048 random bits |
 | 11.2.4 | 3 | Verify that all cryptographic operations are constant-time, with no 'short-circuit' operations in comparisons, calculations, or returns, to avoid leaking information. | ✅ Yes | The token is compared with `hmac.compare_digest` |
 | 11.2.5 | 3 | Verify that all cryptographic modules fail securely, and errors are handled in a way that does not enable vulnerabilities, such as Padding Oracle attacks. | ➖ n/a | The app encrypts and decrypts nothing itself |
 
@@ -658,7 +659,7 @@ Does not apply: no OAuth, no OIDC.
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 11.6.1 | 2 | Verify that only approved cryptographic algorithms and modes of operation are used for key generation and seeding, and digital signature generation and verification. Key generation algorithms must not generate insecure keys vulnerable to known attacks, for example, RSA keys which are vulnerable to Fermat factorization. | ✅ Yes | ED25519 for the SSH key, made by the Terraform `tls` provider |
+| 11.6.1 | 2 | Verify that only approved cryptographic algorithms and modes of operation are used for key generation and seeding, and digital signature generation and verification. Key generation algorithms must not generate insecure keys vulnerable to known attacks, for example, RSA keys which are vulnerable to Fermat factorization. | ✅ Yes | ED25519 for the SSH key and ECDSA P-256 for the VPN's, made by the Terraform `tls` provider |
 | 11.6.2 | 3 | Verify that approved cryptographic algorithms are used for key exchange (such as Diffie-Hellman) with a focus on ensuring that key exchange mechanisms use secure parameters. This will prevent attacks on the key establishment process which could lead to adversary-in-the-middle attacks or cryptographic breaks. | 🟡 Partly | Set by the listener's TLS policy; only a deployment on AWS shows it |
 
 #### V11.7 In-Use Data Cryptography
@@ -691,7 +692,7 @@ Does not apply: no OAuth, no OIDC.
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 12.3.1 | 2 | Verify that an encrypted protocol such as TLS is used for all inbound and outbound connections to and from the application, including monitoring systems, management tools, remote access and SSH, middleware, databases, mainframes, partner systems, or external APIs. The server must not fall back to insecure or unencrypted protocols. | ❌ No | PostgreSQL without TLS; S3 over plain HTTP in the emulator. SSH is encrypted |
+| 12.3.1 | 2 | Verify that an encrypted protocol such as TLS is used for all inbound and outbound connections to and from the application, including monitoring systems, management tools, remote access and SSH, middleware, databases, mainframes, partner systems, or external APIs. The server must not fall back to insecure or unencrypted protocols. | ❌ No | PostgreSQL without TLS; S3 over plain HTTP in the emulator. SSH is encrypted, and so is the administrators' way in, the VPN (TLS 1.3, `tls-crypt`) |
 | 12.3.2 | 2 | Verify that TLS clients validate certificates received before communicating with a TLS server. | ❌ No | No TLS client yet, so no certificate is checked |
 | 12.3.3 | 2 | Verify that TLS or another appropriate transport encryption mechanism used for all connectivity between internal, HTTP-based services within the application, and does not fall back to insecure or unencrypted communications. | ❌ No | The load balancer talks to nginx over HTTP |
 | 12.3.4 | 2 | Verify that TLS connections between internal services use trusted certificates. Where internally generated or self-signed certificates are used, the consuming service must be configured to only trust specific internal CAs and specific self-signed certificates. | ❌ No | As 12.3.3 |
@@ -703,7 +704,7 @@ Does not apply: no OAuth, no OIDC.
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 13.1.1 | 2 | Verify that all communication needs for the application are documented. This must include external services which the application relies upon and cases where an end user might be able to provide an external location to which the application will then connect. | 🟡 Partly | In the README's diagram and text, not stated as a list |
+| 13.1.1 | 2 | Verify that all communication needs for the application are documented. This must include external services which the application relies upon and cases where an end user might be able to provide an external location to which the application will then connect. | 🟡 Partly | The README's first diagram draws every connection with its port, and `terraform/security-groups.tf` has each one as a rule. The outside services are named, not stated as a list |
 | 13.1.2 | 3 | Verify that for each service the application uses, the documentation defines the maximum number of concurrent connections (e.g., connection pool limits) and how the application behaves when that limit is reached, including any fallback or recovery mechanisms, to prevent denial of service conditions. | ❌ No | Not documented |
 | 13.1.3 | 3 | Verify that the application documentation defines resource-management strategies for every external system or service it uses (e.g., databases, file handles, threads, HTTP connections). This should include resource-release procedures, timeout settings, failure handling, and where retry logic is implemented, specifying retry limits, delays, and back-off algorithms. For synchronous HTTP request–response operations it should mandate short timeouts and either disable retries or strictly limit retries to prevent cascading delays and resource exhaustion. | ❌ No | The time limits exist in the code; they are not documented as a strategy |
 | 13.1.4 | 3 | Verify that the application's documentation defines the secrets that are critical for the security of the application and a schedule for rotating them, based on the organization's threat model and business requirements. | ❌ No | Not documented |
@@ -715,18 +716,18 @@ Does not apply: no OAuth, no OIDC.
 | 13.2.1 | 2 | Verify that communications between backend application components that don't support the application's standard user session mechanism, including APIs, middleware, and data layers, are authenticated. Authentication must use individual service accounts, short-term tokens, or certificate-based authentication and not unchanging credentials such as passwords, API keys, or shared accounts with privileged access. | 🟡 Partly | S3 through the instance role, with short-lived credentials. The database with one password that never changes |
 | 13.2.2 | 2 | Verify that communications between backend application components, including local or operating system services, APIs, middleware, and data layers, are performed with accounts assigned the least necessary privileges. | ❌ No | The app logs in as the database's master user, and gunicorn runs as root |
 | 13.2.3 | 2 | Verify that if a credential has to be used for service authentication, the credential being used by the consumer is not a default credential (e.g., root/root or admin/admin). | ❌ No | User `postgres`, password `development-only`, the default in `terraform/variables.tf` |
-| 13.2.4 | 2 | Verify that an allowlist is used to define the external resources or systems with which the application is permitted to communicate (e.g., for outbound requests, data loads, or file access). This allowlist can be implemented at the application layer, web server, firewall, or a combination of different layers. | ❌ No | The security group lets the instance connect anywhere |
-| 13.2.5 | 2 | Verify that the web or application server is configured with an allowlist of resources or systems to which the server can send requests or load data or files from. | ❌ No | As 13.2.4 |
+| 13.2.4 | 2 | Verify that an allowlist is used to define the external resources or systems with which the application is permitted to communicate (e.g., for outbound requests, data loads, or file access). This allowlist can be implemented at the application layer, web server, firewall, or a combination of different layers. | 🟡 Partly | Each role's security group lets out only the ports it needs, naming its peer group where there is one, and the database sends nothing out. But the instance's HTTPS may go to any address, for its packages at deploy time; and the emulator doesn't enforce security groups |
+| 13.2.5 | 2 | Verify that the web or application server is configured with an allowlist of resources or systems to which the server can send requests or load data or files from. | 🟡 Partly | As 13.2.4 |
 | 13.2.6 | 3 | Verify that where the application connects to separate services, it follows the documented configuration for each connection, such as maximum parallel connections, behavior when maximum allowed connections is reached, connection timeouts, and retry strategies. | ❌ No | Nothing documented to follow (13.1.2) |
 
 #### V13.3 Secret Management
 
 | # | Level | Requirement | Complies | Note |
 |---|---|---|---|---|
-| 13.3.1 | 2 | Verify that a secrets management solution, such as a key vault, is used to securely create, store, control access to, and destroy backend secrets. These could include passwords, key material, integrations with databases and third-party systems, keys and seeds for time-based tokens, other internal secrets, and API keys. Secrets must not be included in application source code or included in build artifacts. For an L3 application, this must involve a hardware-backed solution such as an HSM. | ❌ No | The database password is in the Terraform state, the inventory and each release's `guestbook.env` on the instance; the build holds none. No AWS key is stored: S3 uses the role |
-| 13.3.2 | 2 | Verify that access to secret assets adheres to the principle of least privilege. | 🟡 Partly | The role may only read, write and delete objects of one bucket; the environment file is readable by root only. The database password opens everything |
+| 13.3.1 | 2 | Verify that a secrets management solution, such as a key vault, is used to securely create, store, control access to, and destroy backend secrets. These could include passwords, key material, integrations with databases and third-party systems, keys and seeds for time-based tokens, other internal secrets, and API keys. Secrets must not be included in application source code or included in build artifacts. For an L3 application, this must involve a hardware-backed solution such as an HSM. | ❌ No | The database password is in the Terraform state, the inventory and each release's `guestbook.env` on the instance; the build holds none. No AWS key is stored: S3 uses the role. The VPN server's two keys are in Parameter Store, read with its own role, never in its user data; like every key of the VPN they are also in the Terraform state, and the clients' keys are in `.generated/vpn/` |
+| 13.3.2 | 2 | Verify that access to secret assets adheres to the principle of least privilege. | 🟡 Partly | The role may only read, write and delete objects of one bucket; the VPN server's role may read its two parameters and nothing else; the environment file is readable by root only. The database password opens everything |
 | 13.3.3 | 3 | Verify that all cryptographic operations are performed using an isolated security module (such as a vault or hardware security module) to securely manage and protect key material from exposure outside of the security module. | ➖ n/a | The app holds no key |
-| 13.3.4 | 3 | Verify that secrets are configured to expire and be rotated based on the application's documentation. | ❌ No | The database password never changes |
+| 13.3.4 | 3 | Verify that secrets are configured to expire and be rotated based on the application's documentation. | ❌ No | The database password never changes. The VPN's certificates last 90 days and `terraform apply` renews them; its keys are not rotated |
 
 #### V13.4 Unintended Information Leakage
 

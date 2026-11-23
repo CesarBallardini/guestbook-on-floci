@@ -18,3 +18,26 @@ if grep -E 'changed=[0-9]+' "$log_file" | grep -v -q 'changed=0 '; then
     exit 1
 fi
 echo "Idempotence check passed: a second run changed nothing."
+
+# The VPN answers nobody without the profile's tls-crypt key. This sends what an OpenVPN client
+# without it would send first (P_CONTROL_HARD_RESET_CLIENT_V2: opcode 7, key 0, a session id,
+# no acknowledgements, packet id 0) and expects silence. A server without tls-crypt would
+# answer it.
+vpn_server="$(sed -n 's/^remote \([0-9.]*\) \([0-9]*\)$/\1 \2/p' /work/.generated/vpn/ansible.ovpn)"
+if ! python3 -I - $vpn_server <<'PYTHON'
+import os, socket, sys
+host, port = sys.argv[1], int(sys.argv[2])
+with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+    probe.settimeout(3)
+    probe.sendto(bytes([7 << 3]) + os.urandom(8) + bytes(5), (host, port))
+    try:
+        probe.recvfrom(2048)
+    except TimeoutError:
+        sys.exit(0)
+sys.exit(1)
+PYTHON
+then
+    echo "VPN check FAILED: the server answered a packet without the tls-crypt key." >&2
+    exit 1
+fi
+echo "VPN check passed: no answer without the tls-crypt key."

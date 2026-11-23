@@ -1,0 +1,84 @@
+#!/bin/sh
+# The VPN server's first boot: install OpenVPN, fetch its two secrets from Parameter Store,
+# write its files and start it under supervisord. Rendered by terraform/vpn.tf; it holds no
+# secret. It runs once, as root. What it did is in /var/log/vpn-user-data.log.
+#
+# In the emulator it runs after Floci's own setup of the instance, whose downloads may still
+# be running when they timed out: every step that needs the network tries again.
+set -eu
+umask 022
+exec >> /var/log/vpn-user-data.log 2>&1
+
+say() {
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*"
+}
+
+# retry <what> <command...>: up to five tries, a minute apart.
+retry() {
+    what="$1"
+    shift
+    for attempt in 1 2 3 4 5; do
+        if "$@"; then
+            return 0
+        fi
+        say "$what: try $attempt of 5 failed"
+        [ "$attempt" -eq 5 ] || sleep 60
+    done
+    say "$what: giving up. Replace this instance: make replace-vpn"
+    exit 1
+}
+
+say "start"
+retry "dnf install" dnf install -y openvpn iptables-nft awscli-2 python3.14 python3.14-pip
+retry "pip install supervisor" python3.14 -m pip install --disable-pip-version-check supervisor==${supervisor_version}
+
+# The package makes this folder root:openvpn, mode 750. OpenVPN reads ccd/ as the user
+# openvpn, after dropping root; the keys it reads before.
+cd ${server_dir}
+install -d -m 0750 -g openvpn ccd
+
+cat > ca.crt <<'PEM'
+${chomp(ca_cert)}
+PEM
+cat > server.crt <<'PEM'
+${chomp(server_cert)}
+PEM
+cat > server.conf <<'CONF'
+${chomp(server_conf)}
+CONF
+cat > /etc/supervisord.conf <<'CONF'
+${chomp(supervisord_conf)}
+CONF
+
+# The secrets, with the instance role's credentials. In the emulator Parameter Store is at
+# Floci's address; on AWS the address is left out. The metadata service that hands out the
+# credentials is part of Floci's own setup, hence the retries.
+parameter_store_url='${parameter_store_url}'
+fetch() {
+    aws $${parameter_store_url:+--endpoint-url "$parameter_store_url"} --region '${region}' \
+        ssm get-parameter --with-decryption --name "$1" --query Parameter.Value --output text \
+        > "$2.new" && mv "$2.new" "$2"
+}
+umask 077
+retry "fetch the server's key" fetch '${server_key_parameter}' server.key
+retry "fetch the tls-crypt key" fetch '${tls_crypt_parameter}' tls-crypt.key
+umask 022
+
+# The deploy's client, so that Ansible can connect. The playbook adds the others.
+install -m 0640 -g openvpn /dev/null ccd/${deploy_client}
+
+# The tunnel reaches the VPC as this server's own address. The image has no sysctl.
+echo 1 > /proc/sys/net/ipv4/ip_forward
+iptables -t nat -C POSTROUTING -s ${client_cidr} -j MASQUERADE 2>/dev/null ||
+    iptables -t nat -A POSTROUTING -s ${client_cidr} -j MASQUERADE
+
+supervisord --configuration /etc/supervisord.conf
+for attempt in $(seq 50); do
+    if supervisorctl status openvpn | grep -q RUNNING; then
+        say "OpenVPN runs"
+        exit 0
+    fi
+    sleep 0.2
+done
+say "OpenVPN did not start: see /var/log/openvpn.log"
+exit 1
