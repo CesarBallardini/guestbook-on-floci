@@ -15,7 +15,9 @@
   hosts: all
   gather_facts: false
   vars:
-    minimum_python_version: "3.14.5"
+    # Python and uv at or above the releases that stop trusting the compromised eMudhra
+    # certificates (the advisory of 2026-10-20).
+    minimum_python_version: "3.14.10"
     uv_version: "0.13.7"
     supervisor_version: "4.3.0"
     # What "make build" made: one wheel, and requirements.txt with the locked dependencies.

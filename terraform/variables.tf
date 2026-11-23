@@ -7,7 +7,7 @@ variable "emulator_url" {
 variable "ami_id" {
   description = "The instance's AMI. It must be an imageId of floci/image-catalog.yaml, which maps it to a Docker image."
   type        = string
-  default     = "ami-al2023-20260611"
+  default     = "ami-al2023-20261120"
 }
 
 variable "listener_port" {

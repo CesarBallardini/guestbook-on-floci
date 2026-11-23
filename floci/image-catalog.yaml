@@ -2,19 +2,27 @@
 # (FLOCI_SERVICES_EC2_IMAGE_CATALOG_PATH in compose.yaml), so it lists every AMI the emulator
 # offers: one.
 #
-# The image is Amazon Linux 2023 as of June 2026 (release 2023.12.20260608, the first with
-# Python 3.14.5), pinned by digest. An Amazon Linux 2023 image installs packages from the
-# repository version it was built for, so this line also fixes the versions dnf installs.
+# The image is Amazon Linux 2023 as of November 2026 (release 2023.12.20261120, with Python
+# 3.14.10, which stops trusting the compromised eMudhra certificates), pinned by digest. An
+# Amazon Linux 2023 image installs packages from the repository version it was built for, so
+# this line also fixes the versions dnf installs.
+#
+# Its pip is 26.1.1, below the 26.2.2 that the eMudhra advisory names, and Amazon Linux 2023
+# has no newer one. That pip brings no certificates of its own: it uses the system's store
+# through truststore, so its connections go through the ssl module of Python 3.14.10. That
+# is safe only if the advisory's fix is in Python's ssl, which is assumed here, not checked
+# against the advisory. Look again when Amazon Linux ships pip 26.2.2 or later.
+#
 # To move to a later release, change the tag and the digest here, and the AMI id to match
 # (also in terraform/variables.tf).
-defaultDockerImage: public.ecr.aws/amazonlinux/amazonlinux:2023.12.20260611.0@sha256:d555bba4593ec3992e9ac8c081bad81d7f01a951bf0f890c7ae8f0026f381352
+defaultDockerImage: public.ecr.aws/amazonlinux/amazonlinux:2023.12.20261120.0@sha256:5c38fd85b00ce8c094315d9b71f671f880052314a22bd25f1a027821bf61d9d7
 
 images:
-  - imageId: ami-al2023-20260611
-    dockerImage: public.ecr.aws/amazonlinux/amazonlinux:2023.12.20260611.0@sha256:d555bba4593ec3992e9ac8c081bad81d7f01a951bf0f890c7ae8f0026f381352
-    name: al2023-container-2023.12.20260611.0-x86_64
-    description: Amazon Linux 2023, container image 2023.12.20260611.0
+  - imageId: ami-al2023-20261120
+    dockerImage: public.ecr.aws/amazonlinux/amazonlinux:2023.12.20261120.0@sha256:5c38fd85b00ce8c094315d9b71f671f880052314a22bd25f1a027821bf61d9d7
+    name: al2023-container-2023.12.20261120.0-x86_64
+    description: Amazon Linux 2023, container image 2023.12.20261120.0
     ownerId: "137112412989"
     imageOwnerAlias: amazon
     architecture: x86_64
-    creationDate: "2026-06-22T00:00:00.000Z"
+    creationDate: "2026-11-20T00:00:00.000Z"
