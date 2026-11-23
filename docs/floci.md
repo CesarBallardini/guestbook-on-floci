@@ -76,19 +76,52 @@ function awsl { aws --endpoint-url http://127.0.0.1:4566 @args }
 
 The examples below are for Git Bash. In PowerShell, the one with `$( )` works as written too.
 
-**The instance:** its id, its state and its address on the Docker network.
+**The instances:** the app's, `guestbook`, and the VPN server, `guestbook-vpn`. For each, its
+id, its state, its address on the Docker network and its subnet.
 
 ```bash
-awsl ec2 describe-instances --query 'Reservations[].Instances[].[InstanceId,State.Name,PrivateIpAddress]' --output table
+awsl ec2 describe-instances --filters Name=instance-state-name,Values=running --query "Reservations[].Instances[].[Tags[?Key=='Name']|[0].Value,InstanceId,State.Name,PrivateIpAddress,SubnetId]" --output table
 ```
 
 ```
-+----------------------+----------+--------------+
-|  i-77abfa3765f518bba |  running |  172.22.0.5  |
-+----------------------+----------+--------------+
++---------------+-----------------------+----------+-------------+-------------------+
+|  guestbook    |  i-77b016a622103518c  |  running |  172.21.0.4 |  subnet-f24c6b23  |
+|  guestbook-vpn|  i-61a1d6c61c13286b1  |  running |  172.21.0.5 |  subnet-609ee3af  |
++---------------+-----------------------+----------+-------------+-------------------+
 ```
 
-Instances that were replaced stay in the list for a while, as `terminated`.
+Without the filter, instances that were replaced show too, for a while, as `terminated`.
+The address is Docker's, not the subnet's: section 5.
+
+**The network:** the six subnets, by tier and zone, and the four security groups.
+
+```bash
+awsl ec2 describe-subnets --filters Name=tag:Name,Values='guestbook-*' --query "Subnets[].[Tags[?Key=='Name']|[0].Value,CidrBlock,AvailabilityZone]" --output table
+awsl ec2 describe-security-groups --filters Name=group-name,Values='guestbook-*' --query 'SecurityGroups[].[GroupName,GroupId]' --output table
+```
+
+```
++--------------------+----------------+--------------+
+|  guestbook-app-a   |  10.0.10.0/24  |  us-east-1a  |
+|  guestbook-data-b  |  10.0.21.0/24  |  us-east-1b  |
+|  guestbook-public-b|  10.0.1.0/24   |  us-east-1b  |
+|  ...               |                |              |
++--------------------+----------------+--------------+
+```
+
+**The VPN server's secrets:** its private key and the `tls-crypt` key, encrypted. Add
+`--with-decryption` to `ssm get-parameter` to read one; the server does that at first boot.
+
+```bash
+awsl ssm describe-parameters --query 'Parameters[].[Name,Type]' --output table
+```
+
+```
++-------------------------------+----------------+
+|  /guestbook/vpn/server-key    |  SecureString  |
+|  /guestbook/vpn/tls-crypt-key |  SecureString  |
++-------------------------------+----------------+
+```
 
 **The pictures:** one object per picture a visitor attached. Empty until somebody does.
 
@@ -136,18 +169,36 @@ terraform state list        # in terraform/: every resource Terraform created
 docker ps                   # the containers behind them: the emulator, the instance, the database, the console
 ```
 
-What runs on the instance, and what the app wrote. The instance's container is named
-`floci-aws-ec2-<instance id>`; `terraform output instance` prints the id.
+What runs on the instance, and what the app wrote. An instance's container is named
+`floci-aws-ec2-<instance id>`; Floci chooses that name, and has no setting to change it.
+`terraform output containers` prints both, by role:
+
+```
+{
+  "app" = "floci-aws-ec2-i-77b016a622103518c"
+  "vpn" = "floci-aws-ec2-i-61a1d6c61c13286b1"
+}
+```
 
 ```powershell
-docker exec floci-aws-ec2-<instance id> supervisorctl status                 # gunicorn and nginx, under supervisord
-docker exec floci-aws-ec2-<instance id> tail /var/log/guestbook.log          # the app's output
-docker exec floci-aws-ec2-<instance id> readlink /opt/guestbook/current      # the release that runs
+docker exec floci-aws-ec2-<app id> supervisorctl status                 # gunicorn and nginx, under supervisord
+docker exec floci-aws-ec2-<app id> tail /var/log/guestbook.log          # the app's output
+docker exec floci-aws-ec2-<app id> readlink /opt/guestbook/current      # the release that runs
+```
+
+On the VPN server:
+
+```powershell
+docker exec floci-aws-ec2-<vpn id> supervisorctl status                 # openvpn, under supervisord
+docker exec floci-aws-ec2-<vpn id> cat /var/log/openvpn-status.log      # who is connected now, and from where
+docker exec floci-aws-ec2-<vpn id> tail /var/log/openvpn.log            # connections, refusals ("AUTH_FAILED", "tls-crypt unwrapping failed")
+docker exec floci-aws-ec2-<vpn id> cat /var/log/vpn-user-data.log       # its first boot: installs, the keys' fetch, retries
+docker exec floci-aws-ec2-<vpn id> ls /etc/openvpn/server/ccd           # who may connect: one file per name in vpn_clients
 ```
 
 ## 5. What Floci 2.5.0 does with instances and networks
 
-Checked on 2026-11-22 with this project's settings (`compose.yaml`).
+Checked on 2026-11-22 and 2026-11-23 with this project's settings (`compose.yaml`).
 
 **A network is recorded, not built.** Floci accepts a VPC of one's own, subnets in two zones,
 an internet gateway, Elastic IPs, a NAT gateway, route tables and their routes, an S3 gateway
@@ -171,7 +222,38 @@ network can reach an instance only by SSH.
 
 **A pinned subnet works.** With `ipam` and a subnet set for `guestbook-on-floci` in
 `compose.yaml` (tried with `172.30.0.0/24`), Floci, RDS and the instances come up in it, and
-the addresses are predictable.
+the addresses are predictable. This project doesn't pin it: Terraform reports each
+instance's address, and a pinned range could clash with another Docker network.
+
+**A VPN client on the Docker network must route each address alone.** A route the server
+pushes for the network's own subnet loses to the client container's connected route to that
+subnet, so the traffic goes direct and skips the tunnel. The deploy's profile therefore
+takes no pushed routes (`route-nopull`) and routes the instance's address as a `/32`;
+`ansible/run-playbook.sh` checks it before the playbook runs.
+
+**Elastic IPs, and what Terraform has to allow for:**
+
+- An Elastic IP has the address `203.0.113.x` while it is attached to nothing, and
+  `127.0.0.1` once it is. Read it from `aws_eip_association`, which gives the address after
+  the attach.
+- Once one is attached, the instance reports `associate_public_ip_address = true`. Writing
+  `false` makes every plan replace the instance.
+- Moving one to a new instance through `aws_eip`'s `instance` fails: the provider sends both
+  the instance and its network interface, and Floci answers "Specify either InstanceId or
+  NetworkInterfaceId, but not both". A separate `aws_eip_association` sends only the
+  instance.
+
+**A rule's peer group comes back as `000000000000/sg-...`,** the form AWS uses for another
+account's group. The provider expects that form when it doesn't know its own account id,
+and `versions.tf` tells it not to ask (`skip_requesting_account_id`). Every plan would change
+the rule, so the rules ignore that attribute (`terraform/security-groups.tf`). Letting the
+provider ask instead is worse: it then calls S3 Control, which has no emulator endpoint
+here, so the call goes to real AWS (and is refused).
+
+**Parameter Store and instance roles work.** A `SecureString` comes back decrypted with
+`--with-decryption`, and as ciphertext without it. From an instance, the AWS CLI and boto3
+get the role's credentials from the metadata service and read it at
+`http://aws-emulator:4566`. The policy isn't enforced, like every IAM policy here.
 
 **How a new instance is set up.** Floci starts the container, then installs with dnf what it
 needs: the metadata service's proxy (it waits up to 180 seconds) and openssh-server (up to

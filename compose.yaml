@@ -1,7 +1,7 @@
 # The AWS emulator and the Ansible control node.
 #
 #   docker compose up -d --wait        # start Floci, before Terraform
-#   docker compose run --rm ansible    # run the playbook, after Terraform
+#   docker compose run --rm --build ansible    # run the playbook, after Terraform
 #
 # Floci starts the EC2 instance and the RDS instance as containers of their own, so it needs the
 # Docker socket. That gives this container control of the Docker daemon: the image is pinned by
@@ -50,8 +50,16 @@ services:
     build: ./ansible
     image: guestbook-on-floci-ansible
     volumes:
-      # The playbook, the app, and the key and inventory that Terraform wrote in .generated/
+      # The playbook, the app, and the key, inventory and VPN profile that Terraform wrote in
+      # .generated/
       - .:/work:ro
+    # It reaches the instances through the VPN, as the deploy's client: a tunnel needs the tun
+    # device and the right to set routes. It stays on the network below to reach the VPN
+    # server; the emulator can't make the VPN its only way in (docs/floci.md, section 5).
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     networks:
       - guestbook-on-floci
 

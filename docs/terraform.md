@@ -230,12 +230,13 @@ resource "aws_s3_bucket" "first" {     # type "aws_s3_bucket", name "first"
 ```
 
 **`data`** looks up something that exists already and that Terraform doesn't manage. This
-project asks for the default network instead of creating one:
+project asks which region it works in, and names the subnets' zones and the S3 endpoint
+after it:
 
 ```hcl
-data "aws_vpc" "default" {
-  default = true
-}
+data "aws_region" "current" {}
+
+# elsewhere: "${data.aws_region.current.region}a" is the first zone, us-east-1a
 ```
 
 **`variable`** is a setting with a type, a description and usually a default.
@@ -272,8 +273,9 @@ terraform state show aws_instance.app       # one of them, in full
 
 - **Don't edit it by hand, and don't delete it.** Without it, Terraform no longer knows that
   the things it created are its own, and would try to create them all again.
-- **It holds secrets.** In this project: the database's password and the SSH private key. That
-  is why `.gitignore` keeps it out of the repository. Teams that share real infrastructure keep
+- **It holds secrets.** In this project: the database's password, the SSH private key and
+  every key of the VPN, its certificate authority's included. That is why `.gitignore` keeps
+  it out of the repository. Teams that share real infrastructure keep
   the state in a shared, locked place (an S3 bucket, for instance) instead of on one laptop.
 - **When the emulator lost everything.** Floci keeps its resources in memory, so restarting it
   empties it while the state still lists them. Here that is cheap to solve: run
@@ -301,6 +303,7 @@ outputs. It is still in the state, in clear.
 terraform fmt           # rewrites the files in the standard layout
 terraform validate      # checks them without calling the provider
 tflint                  # finds mistakes validate doesn't, such as unused variables
+terraform test          # runs the checks in tests/ (section 10)
 terraform plan          # before every apply, and read it
 ```
 
@@ -316,8 +319,13 @@ terraform plan          # before every apply, and read it
 |---|---|---|
 | `versions.tf` | The `terraform` and `provider` blocks | How every AWS call is sent to the emulator |
 | `variables.tf` | The settings | Descriptions that say what must match `compose.yaml` |
-| `main.tf` | Every resource | `data` lookups, references, `jsonencode` for IAM policies, and files written with `local_sensitive_file` |
+| `main.tf` | The instance, the bucket, the database, the load balancer, Ansible's inventory | `data` lookups, references, `jsonencode` for IAM policies, and files written with `local_sensitive_file` |
+| `network.tf` | The VPC, its subnets, gateways, route tables and S3 endpoint | `for_each` over a map built with `cidrsubnet` (section 10) |
+| `security-groups.tf` | One group per role, and their rules | Rules as entries of a map, each naming its peer group |
+| `vpn.tf` | The VPN server, its keys, its secrets in Parameter Store, the profiles | The `tls` provider as a small certificate authority, and `templatefile` |
+| `vpn-user-data.sh.tftpl` | The script the VPN server runs at first boot | A template: `${...}` is Terraform's, `$${...}` the shell's |
 | `outputs.tf` | What `apply` prints | Outputs built from variables and resources |
+| `tests/network.tftest.hcl` | What the network must let through, and what it must not | `terraform test` with mocked providers (section 10) |
 
 Three things in `main.tf` go beyond the exercise above:
 
@@ -329,3 +337,75 @@ Three things in `main.tf` go beyond the exercise above:
   database do. Terraform creates the machines; it doesn't install software on them.
 - **A resource is left partly to the provider.** The RDS instance sets no `port`, because the
   emulator chooses one, and the inventory reads the port back from the resource.
+
+## 10. The network: many blocks from one map, and a test that needs no AWS
+
+**Six subnets, one block.** `network.tf` builds a map, one entry per subnet, and one
+`aws_subnet` block makes them all with `for_each`:
+
+```hcl
+locals {
+  zones        = { a = "us-east-1a", b = "us-east-1b" }   # in the file: from data.aws_region
+  tier_netnums = { public = 0, app = 10, data = 20 }
+  subnets = merge([
+    for tier, netnum in local.tier_netnums : {
+      for i, zone in keys(local.zones) : "${tier}-${zone}" => {
+        tier = tier
+        zone = local.zones[zone]
+        cidr = cidrsubnet(var.vpc_cidr, 8, netnum + i)   # 10.0.0.0/16 -> 10.0.0.0/24, 10.0.1.0/24, 10.0.10.0/24...
+      }
+    }
+  ]...)
+}
+
+resource "aws_subnet" "all" {
+  for_each          = local.subnets
+  vpc_id            = aws_vpc.guestbook.id
+  cidr_block        = each.value.cidr
+  availability_zone = each.value.zone
+}
+```
+
+Each one is then `aws_subnet.all["app-a"]`, and in the state too: `terraform state list`
+shows the keys. A key that leaves the map destroys its subnet, and only that one.
+
+**Route tables decide what a subnet is.** A subnet is public because its route table sends
+`0.0.0.0/0` to the internet gateway. The app subnets send it to the NAT gateway, which lets
+the instance download packages but lets nothing in. The data subnets have no route out at
+all. `aws_route_table_association` ties each subnet to its table.
+
+**Security groups that name each other.** A rule can let in another group instead of
+addresses: "port 5432 from `guestbook-app`" means "from whatever has that group", wherever
+it is. `security-groups.tf` writes every rule as one entry of a map, and one resource makes
+them:
+
+```hcl
+db_postgres_from_app = { group = "db", protocol = "tcp", port = 5432, peer = "app" }
+```
+
+**`terraform test`.** The emulator records security groups and routes but enforces neither,
+so nothing at run time would notice a rule that lets too much in. `tests/network.tftest.hcl`
+checks the rules themselves:
+
+```hcl
+mock_provider "aws" {}     # no AWS calls: the provider answers with made-up ids
+mock_provider "local" {}   # and writes no files, so .generated/ is left alone
+
+run "ssh_and_postgres_come_only_from_their_peers" {
+  command = apply          # "apply" against the mocks: the ids are known, so they can be compared
+
+  assert {
+    condition = toset([
+      for rule in aws_vpc_security_group_ingress_rule.all : rule.referenced_security_group_id
+      if rule.from_port == 22
+    ]) == toset([aws_security_group.vpn.id])
+    error_message = "Port 22 opens only to guestbook-vpn."
+  }
+}
+```
+
+The real file also gives a few mocked resources ARNs shaped like AWS's, because the provider
+checks the shape of an ARN it is handed. `make lint` runs the test. It needs no emulator and
+takes a few seconds. With `command = plan`
+instead, the ids would be `(known after apply)`, and a condition that compares them couldn't
+be evaluated.

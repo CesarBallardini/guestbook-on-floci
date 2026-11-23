@@ -2,8 +2,8 @@
 # gunicorn.
 #
 #   make build                                      # from the folder above: the wheel, in app/dist/
-#   docker compose run --rm ansible                 # after "terraform apply" and "make build"
-#   docker compose run --rm ansible -e rollback=true    # run the release before the current one
+#   docker compose run --rm --build ansible         # after "terraform apply" and "make build"
+#   docker compose run --rm --build ansible -e rollback=true    # run the release before the current one
 #
 # Build, release, run: the build is made on the laptop. A release is that build installed in a
 # folder of its own on the instance, with the config next to it, and nothing in it changes
@@ -11,8 +11,97 @@
 #
 # The instance is a container without systemd, so supervisord is its process manager: it runs
 # nginx and gunicorn in the foreground. The playbook starts supervisord, the one daemon here.
+#
+# Ansible reaches both hosts through the VPN (run-playbook.sh connects first), so the VPN
+# server's play comes first.
+
+# The VPN server set itself up at first boot (terraform/vpn-user-data.sh.tftpl), from the same
+# files Terraform hands over here: after that, this play changes nothing. It keeps them so, and
+# keeps the list of clients that may connect. It never sees a private key: the server fetched
+# its own from Parameter Store.
+- name: Keep the VPN server
+  hosts: vpn
+  gather_facts: false
+  vars:
+    vpn_server_dir: /etc/openvpn/server
+    vpn_ccd_dir: "{{ vpn_server_dir }}/ccd"
+
+  tasks:
+    - name: Wait until the VPN server accepts SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 180
+
+    - name: Install the check for a running daemon
+      ansible.builtin.import_tasks: tasks/pid-file-alive.yml
+
+    - name: Configure OpenVPN
+      ansible.builtin.copy:
+        dest: "{{ vpn_server_dir }}/server.conf"
+        content: "{{ vpn_server_conf }}"
+        mode: "0644"
+      notify: Restart OpenVPN
+
+    - name: Configure supervisord
+      ansible.builtin.copy:
+        dest: /etc/supervisord.conf
+        content: "{{ vpn_supervisord_conf }}"
+        mode: "0644"
+      notify: Update supervisord
+
+    # "ccd-exclusive": a client may connect only if it has a file here, even an empty one.
+    # OpenVPN reads them as the user openvpn.
+    - name: Let the listed clients connect
+      ansible.builtin.copy:
+        dest: "{{ vpn_ccd_dir }}/{{ item }}"
+        content: ""
+        owner: root
+        group: openvpn
+        mode: "0640"
+      loop: "{{ vpn_clients }}"
+
+    - name: List the clients that may connect
+      ansible.builtin.find:
+        paths: "{{ vpn_ccd_dir }}"
+        file_type: any
+      register: vpn_ccd_files
+
+    # Refused at their next connection. A tunnel that is up stays up until then.
+    - name: Refuse the clients that are no longer listed
+      ansible.builtin.file:
+        path: "{{ vpn_ccd_dir }}/{{ item }}"
+        state: absent
+      loop: "{{ vpn_ccd_files.files | map(attribute='path') | map('basename') | difference(vpn_clients) }}"
+
+    - name: List the clients that may connect, again
+      ansible.builtin.find:
+        paths: "{{ vpn_ccd_dir }}"
+        file_type: any
+      register: vpn_ccd_files_after
+
+    - name: Check that exactly the listed clients may connect
+      ansible.builtin.assert:
+        that: vpn_ccd_files_after.files | map(attribute='path') | map('basename') | sort == vpn_clients | sort
+        fail_msg: "ccd/ holds {{ vpn_ccd_files_after.files | map(attribute='path') | map('basename') | sort }}, not {{ vpn_clients | sort }}"
+        success_msg: "May connect: {{ vpn_clients | sort | join(', ') }}"
+
+  # Both restart OpenVPN, which drops the tunnel this play runs through. So each one starts it
+  # in the background, a second later, and returns at once. The next play's first task waits
+  # while the deploy's client connects again.
+  handlers:
+    - name: Update supervisord
+      ansible.builtin.shell: |
+        pid-file-alive /run/supervisord.pid || exit 0
+        nohup sh -c 'sleep 1; supervisorctl update' > /dev/null 2>&1 &
+      changed_when: true
+
+    - name: Restart OpenVPN
+      ansible.builtin.shell: |
+        pid-file-alive /run/supervisord.pid || exit 0
+        nohup sh -c 'sleep 1; supervisorctl restart openvpn' > /dev/null 2>&1 &
+      changed_when: true
+
 - name: Release and run the guestbook
-  hosts: all
+  hosts: app
   gather_facts: false
   vars:
     # Python and uv at or above the releases that stop trusting the compromised eMudhra
@@ -67,18 +156,8 @@
         fail_msg: "Python {{ python_version.stdout }} is older than {{ minimum_python_version }}"
         success_msg: "{{ system_release.stdout }}, Python {{ python_version.stdout }}"
 
-    # For supervisord, the one daemon here. A stopped daemon stays in the process table as a
-    # zombie: the instance's first process is not an init and never collects it. So "is it
-    # running" asks for a process that isn't one.
     - name: Install the check for a running daemon
-      ansible.builtin.copy:
-        dest: /usr/local/bin/pid-file-alive
-        mode: "0755"
-        content: |
-          #!/bin/sh
-          # pid-file-alive <pid file>: succeeds when the file names a process that still runs.
-          pid="$(cat "$1" 2>/dev/null)" && [ -n "$pid" ] && [ -r "/proc/$pid/status" ] &&
-            ! grep -q '^State:[[:space:]]*Z' "/proc/$pid/status"
+      ansible.builtin.import_tasks: tasks/pid-file-alive.yml
 
     - name: Install uv
       ansible.builtin.command: python3.14 -m pip install --disable-pip-version-check uv=={{ uv_version }}

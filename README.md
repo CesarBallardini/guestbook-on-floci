@@ -10,32 +10,110 @@ The tools are split the way they are on a real site:
 
 | Tool | Does |
 |---|---|
-| **Terraform** | Creates the infrastructure in the emulator: an EC2 instance, a PostgreSQL RDS instance, an S3 bucket, an IAM role for the instance, and a load balancer with HTTP and HTTPS listeners |
-| **Ansible** | Connects to the instance over SSH, installs Python 3.14, nginx and supervisord, makes a release from the app's build (with uv) and runs it |
+| **Terraform** | Creates the infrastructure in the emulator: a network of its own, an EC2 instance, a PostgreSQL RDS instance, an S3 bucket, an IAM role for the instance, a load balancer with HTTP and HTTPS listeners, and an OpenVPN server for the administrators |
+| **Ansible** | Connects through the VPN, then over SSH to the instance: installs Python 3.14, nginx and supervisord, makes a release from the app's build (with uv) and runs it |
 | **The app** | A guestbook, made with FastAPI and HTMX: visitors leave a message, with a picture if they like. Messages go to PostgreSQL, pictures to S3 |
+
+### The network, as Terraform declares it
+
+```mermaid
+flowchart LR
+    visitor(["Visitor's browser"])
+    admin(["Ansible, or an<br/>administrator"])
+    subgraph vpc["The guestbook's VPC, 10.0.0.0/16, in two zones"]
+        subgraph public["Public subnets"]
+            lb["Load balancer<br/><i>guestbook-alb</i>"]
+            vpn["VPN server: OpenVPN<br/>Elastic IP<br/><i>guestbook-vpn</i>"]
+            nat["NAT gateway"]
+        end
+        subgraph app["App subnets: no public address"]
+            ec2["EC2 instance<br/>nginx, gunicorn: the guestbook<br/><i>guestbook-app</i>"]
+        end
+        subgraph data["Data subnets: no way out"]
+            rds[("RDS: PostgreSQL<br/><i>guestbook-db</i>")]
+        end
+        endpoint["S3 endpoint"]
+    end
+    s3[("S3: the pictures")]
+    ssm[("Parameter Store:<br/>the VPN server's keys")]
+    packages(("Packages:<br/>Amazon Linux, PyPI"))
+
+    visitor -- "HTTPS 8443<br/>(HTTP 8080 only redirects)" --> lb
+    admin -- "UDP 1194, with the profile's key" --> vpn
+    lb -- "HTTP 80" --> ec2
+    vpn -- "SSH 22" --> ec2
+    vpn -. "PostgreSQL 5432, for psql" .-> rds
+    ec2 -- "PostgreSQL 5432" --> rds
+    ec2 -- "HTTPS 443" --> endpoint --> s3
+    ec2 -- "HTTPS 443, at deploy time" --> nat --> packages
+    vpn -- "HTTPS 443, at first boot" --> ssm
+    vpn -- "HTTPS 443, at first boot" --> packages
+```
+
+Each box in italics is a security group, and each arrow is a rule of one
+(`terraform/security-groups.tf`). An arrow that isn't there is traffic no rule lets
+through. Only the two arrows from the left come from the internet:
+
+- **Visitors** reach the load balancer only. It forwards HTTP to nginx on the instance, and
+  nginx to gunicorn. The instance has no public address, so nobody reaches it directly.
+- **Administrators** reach the VPN server only. A packet without the profile's `tls-crypt`
+  key gets no answer, so to anyone else the port looks closed. Through the tunnel, the VPN
+  server lets them reach the instance by SSH, which is how Ansible deploys, and the database
+  with `psql`.
+- **The instance** talks to RDS, and to S3 through the VPC's endpoint: its role may use the
+  bucket only that way. It goes out through the NAT gateway for its packages, which lets
+  nothing in.
+- **RDS** answers the instance and the VPN server, and sends nothing out.
+- **The VPN server** downloads OpenVPN and fetches its two secret keys from Parameter Store at
+  first boot. Its role may read those two keys and nothing else.
+
+| Subnets | Hold | Their route out |
+|---|---|---|
+| Public | The load balancer, the NAT gateway, the VPN server | The internet gateway |
+| App | The instance | The NAT gateway; S3 through the endpoint |
+| Data | RDS | None |
+
+### What runs on the laptop
 
 ```mermaid
 flowchart LR
     browser([Browser])
     terraform([Terraform])
     subgraph laptop["Docker network guestbook-on-floci, on the laptop"]
-        subgraph floci["Floci, the AWS emulator"]
-            api["AWS API<br/>:4566"]
+        subgraph floci["Floci, the AWS emulator: one container"]
+            api["AWS API :4566<br/>Parameter Store, IAM..."]
             lb["Load balancer<br/>:8443 HTTPS<br/>:8080 redirects to it"]
             s3[("S3 bucket")]
         end
-        subgraph instance["EC2 instance, a container Floci starts"]
+        subgraph instance["EC2 instance: a container"]
             nginx["nginx :80"] --> gunicorn["gunicorn + uvicorn<br/>the guestbook"]
         end
-        rds[("RDS: PostgreSQL 16")]
+        vpn["VPN server: a container<br/>OpenVPN :1194"]
+        rds[("RDS: PostgreSQL 16<br/>a container")]
         ansible["Ansible<br/>control node"]
     end
-    browser --> lb --> nginx
+    browser -- "127.0.0.1:8443" --> lb --> nginx
     gunicorn -- messages --> rds
     gunicorn -- pictures --> s3
-    terraform -- creates the infrastructure --> api
-    ansible -- "SSH: installs and starts the app" --> instance
+    terraform -- "127.0.0.1:4566: creates everything" --> api
+    vpn -- "its keys, at first boot" --> api
+    ansible -- "the tunnel" --> vpn
+    vpn -- "SSH: installs and starts the app" --> instance
 ```
+
+Floci turns each instance and the database into a container of its own, and puts them all,
+with itself, on one Docker network. The VPC, its subnets and its security groups exist only
+as records in the emulator: every container here can reach every other one, and the
+internet. So in the emulator:
+
+- **The deploy goes through the VPN because it is told to.** The Ansible container could
+  reach the instance directly. Its VPN profile routes the instance's address into the
+  tunnel, and the deploy stops unless that route holds (`ansible/run-playbook.sh`).
+- **The rules are checked by a test, not by traffic.** `terraform test`
+  (`terraform/tests/`) checks each arrow of the first diagram, and that nothing else is let
+  in, without the emulator.
+- **Only the laptop reaches the stack.** Every port Floci publishes is bound to `127.0.0.1`,
+  except each instance's SSH ([section 7](#7-safety-notes)).
 
 What it proves: the same Terraform resources and the same playbook one would write for AWS
 work against the emulator, end to end, and the app can be tested against real PostgreSQL and
@@ -79,7 +157,9 @@ The commands are the same in PowerShell and in Git Bash.
    ```
 
 3. **Create the infrastructure.** Terraform shows its plan and asks; answer `yes`. It takes
-   about two minutes, most of it on the database.
+   about two minutes, most of it on the database. The VPN server then sets itself up on its
+   own, at first boot, for a few more minutes: it installs OpenVPN and fetches its keys from
+   Parameter Store.
 
    ```powershell
    cd terraform
@@ -98,14 +178,17 @@ The commands are the same in PowerShell and in Git Bash.
    cd ..
    ```
 
-5. **Deploy the app.** Ansible makes a release from the build and runs it. The first run
-   builds the Ansible image and takes a few minutes.
+5. **Deploy the app.** Ansible connects to the VPN, then makes a release from the build and
+   runs it. The first run builds the Ansible image and takes a few minutes; `--build` keeps
+   the image in step with `ansible/` afterwards.
 
    ```powershell
-   docker compose run --rm ansible
+   docker compose run --rm --build ansible
    ```
 
-   The run ends with `failed=0`. Among its lines it prints the instance's release, for example
+   It starts with `Through the VPN: <the instance's address> and the VPN server`. Right after
+   step 3 it may first say `Waiting for the VPN`, for up to a few minutes, while the VPN
+   server sets itself up. The run ends with `failed=0`. Among its lines it prints the instance's release, for example
    `Amazon Linux release 2023.12.20261120 (Amazon Linux), Python 3.14.10`, and its last line
    names the release that runs and the state of the database's schema, for example
    `Release 20261119T231500Z runs. The database's schema is up to date.`
@@ -121,7 +204,7 @@ build, its virtual environment and the config; `/opt/guestbook/current` points a
 that runs. The instance keeps the last five. To run the release before the current one:
 
 ```powershell
-docker compose run --rm ansible -e rollback=true
+docker compose run --rm --build ansible -e rollback=true
 ```
 
 A rollback leaves the database's schema as it is: it runs no migration, and undoes none.
@@ -129,6 +212,32 @@ The older release runs on the newer schema, and the playbook ends with
 `The database's schema is ahead of it`. That works because every migration must suit the
 releases before it (expand and contract, `docs/guestbook.md`). `make rollback-check`
 proves it on the running stack.
+
+### Administrators: the VPN
+
+Nobody reaches the instance or the database from the internet: an administrator connects to
+the VPN first, with a profile Terraform writes, one per name in the variable `vpn_clients`.
+`ansible` is always one of them; it is the deploy's own.
+
+```hcl
+# terraform/terraform.tfvars, or -var on the command line
+vpn_clients = ["ansible", "ana"]
+```
+
+After `terraform apply`, `.generated/vpn/ana.ovpn` holds everything the person needs: the
+server's address, the VPN's certificate authority, their certificate and key, and the
+`tls-crypt` key. On Windows, import it into OpenVPN Connect. Then `ssh` and `psql` reach the
+VPC's private addresses.
+
+- **To take someone out,** remove their name and apply, then deploy: the VPN server refuses
+  them at their next connection. Certificates last 90 days, and `terraform apply` renews
+  them in their last 30: the person imports the new profile.
+- **In the emulator, a person's profile can't connect:** it names the Elastic IP, which
+  Floci reports as `127.0.0.1`, and Floci doesn't publish the VPN's UDP port
+  ([section 6](#6-limits)). Those profiles are for AWS. On the laptop, use `docker exec` as in
+  [docs/floci.md](docs/floci.md), section 4, and `psql` on `127.0.0.1:7001`.
+- **On AWS,** set `vpn_deploy_from_docker_network = false`, so the deploy's own profile is
+  like a person's.
 
 ### The same, with Make
 
@@ -145,7 +254,8 @@ With Make installed (`choco install make`), the root `Makefile` wraps the usual 
 | `make smoke` | Checks the running stack: the guestbook answers on both URLs and Terraform has nothing to change |
 | `make idempotence` | Deploys, then runs the playbook again and fails unless that second run reports `changed=0` |
 | `make replace-instance` | A new instance, with the app deployed on it |
-| `make qa` | Every check: Terraform's, the playbook's (ansible-lint) and the app's |
+| `make replace-vpn` | A new VPN server, which sets itself up at first boot, then a deploy through it |
+| `make qa` | Every check: Terraform's (including `terraform test`, the network's rules), the playbook's (ansible-lint) and the app's |
 | `make test`, `make test-integration`, `make test-e2e` | The app's tests, by kind |
 | `make destroy` | Section 8 |
 
@@ -308,10 +418,12 @@ factor, and explains ports and adapters, SOLID and the architecture, with diagra
   cd terraform
   terraform apply -replace=aws_instance.app
   cd ..
-  docker compose run --rm ansible
+  docker compose run --rm --build ansible
   ```
 
-  The messages and pictures survive: they live in RDS and S3, not on the instance.
+  The messages and pictures survive: they live in RDS and S3, not on the instance. The VPN
+  server is the same: `make replace-vpn` makes a new one, which sets itself up again, with
+  the same Elastic IP and the same keys.
 - **Releases live on the instance.** A replaced instance starts with none, so there is
   nothing to roll back to until the second deploy. A rollback does not undo the database's
   migrations: the older release runs on the newer schema. It can only because each migration
@@ -324,7 +436,18 @@ factor, and explains ports and adapters, SOLID and the architecture, with diagra
   refuses a path without one, it must be `/#{path}` (`terraform/main.tf` says so too).
 - **Security groups and IAM policies are recorded, not enforced.** The role's policy is there
   to show the shape; the emulator would let the app do anything. Subnets, routes and gateways
-  are recorded the same way (`docs/floci.md`, section 5).
+  are recorded the same way (`docs/floci.md`, section 5). So the private network is a
+  private network on AWS only. In the emulator every container shares one Docker network,
+  and every instance has the internet. `terraform test` (in `terraform/tests/`) checks what
+  the network lets through, without the emulator.
+- **The emulator shows the VPN working, not that it is the only way in.** Ansible's
+  container stays on the Docker network, where it could reach the instance directly. It goes
+  through the tunnel because its profile routes the instance's address there, and the deploy
+  stops unless it does. Floci publishes no UDP port for an instance, so only that container
+  can use the VPN here; a person's profile is for AWS.
+- **A stack made before the private network can't be updated to it:** the load balancer's
+  target group has to move to the new VPC while its listener still uses it. Destroy it
+  (section 8) and start again from step 2.
 - **The versions are pinned:** Floci 2.5.0 by digest, and Amazon Linux 2023 as of November
   2026 (with Python 3.14.10) in `floci/image-catalog.yaml`. The playbook stops if the
   instance's Python is older than 3.14.10, the first Python 3.14 that stops trusting the
@@ -339,15 +462,21 @@ factor, and explains ports and adapters, SOLID and the architecture, with diagra
   digest, and why the stack should be stopped when it isn't in use.
 - **The instance's container runs privileged.** That is how Floci starts instances when
   security groups aren't enforced.
-- **One port is open beyond this machine: the instance's SSH, on port 2200 of every network
-  interface.** Floci publishes it that way and has no setting for it. Only the key that
-  Terraform generated (in `.generated/`, ignored by Git) can log in. Every other port is bound
-  to `127.0.0.1`, the console's included. To close it, set `"ip": "127.0.0.1"` in Docker Desktop, under Settings,
+- **Two ports are open beyond this machine: each instance's SSH, on ports 2200 and 2201 of
+  every network interface** (the app's instance, then the VPN server). Floci publishes them
+  that way and has no setting for it. Only the key that Terraform generated (in
+  `.generated/`, ignored by Git) can log in. Every other port is bound to `127.0.0.1`, the
+  console's included. To close it, set `"ip": "127.0.0.1"` in Docker Desktop, under Settings,
   Docker Engine; that changes the default for every container on the laptop.
 - **The web console has no login.** Whoever reaches port 4500 sees every
   emulated resource. It is bound to `127.0.0.1`; keep it that way.
 - **The instance has internet,** because Ansible installs packages on it. It only ever sees
   emulated data.
+- **The VPN's keys are in three places:** the Terraform state, `.generated/vpn/` (the
+  profiles, ignored by Git) and, for the server's two, Parameter Store. They are never in the
+  VPN server's user data, which anyone allowed to read the instance's attributes could read.
+  The VPN's certificate authority is its own, trusted by nothing else.
+- **The Ansible container gets `NET_ADMIN` and `/dev/net/tun`,** to open its tunnel.
 
 ## 8. Destroy
 
@@ -370,13 +499,13 @@ volume Floci leaves behind.
 | `Makefile` | The usual commands, by name. `make help` lists them |
 | `compose.yaml` | Floci and the Ansible control node |
 | `floci/image-catalog.yaml` | Which Docker image stands for the instance's AMI |
-| `terraform/` | The infrastructure. `main.tf` is the place to start reading |
+| `terraform/` | The infrastructure. `main.tf` is the place to start reading; `network.tf`, `security-groups.tf` and `vpn.tf` are the network and the way in. `tests/` checks the network's rules |
 | `ansible/` | The control node's image, the playbook, its templates and its files |
 | `app/` | The guestbook, its tests and its tooling |
 | `docs/guestbook.md` | The app explained: ports and adapters, SOLID, the twelve factors, and its architecture in diagrams |
 | `docs/terraform.md` | A mini tutorial on Terraform, with this project as the example |
 | `docs/floci.md` | How to see what runs in the emulator: the console, its URLs, the AWS CLI |
-| `.generated/` | Written by Terraform for Ansible: the SSH key and the inventory. Ignored by Git |
+| `.generated/` | Written by Terraform: the SSH key and the inventory, for Ansible, and the VPN's profiles in `vpn/`. Ignored by Git |
 
 ## 10. References
 

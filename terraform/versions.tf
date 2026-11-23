@@ -14,6 +14,11 @@ terraform {
       source  = "hashicorp/local"
       version = "~> 2.0"
     }
+    # The VPN's tls-crypt key: random bytes, which the tls provider can't make.
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -34,6 +39,7 @@ provider "aws" {
     iam   = var.emulator_url
     rds   = var.emulator_url
     s3    = var.emulator_url
+    ssm   = var.emulator_url
     sts   = var.emulator_url
   }
 }
